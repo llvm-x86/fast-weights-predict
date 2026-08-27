@@ -44,27 +44,27 @@ Legend: ✅ resolved · ⚠️ needs an input from you · ➖ not applicable
 ## Ready-to-paste arXiv metadata
 
 - **Title:** Fast Weights Predict, Not Evaluate: A Hebbian Associative World Model for Interception
-- **Authors:** Gabriel Hill (gabriel@familyfungroup.com)
+- **Authors:** Gabriel Hill
 - **Primary subject class:** `cs.LG` (Machine Learning). Cross-list `cs.NE` (Neural and
   Evolutionary Computing) and `cs.AI` (Artificial Intelligence).
 - **License:** arXiv's default non-exclusive distribution license (or `CC BY 4.0` if you want
-  open reuse — your choice).
-- **Comments (optional):** `9 pages, 1 table. Code: https://github.com/llvm-x86/fast-weights-predict`
+  open reuse -- your choice).
+- **Comments (optional):** `9 pages, 0 figures. Code: https://github.com/llvm-x86/fast-weights-predict`
 
-**Abstract (plain text, for the metadata field):**
+**Abstract (plain ASCII text, for the metadata field — arXiv metadata rejects Unicode):**
 
-> The Dragon Hatchling (BDH) architecture is built on a fast-weight associative memory — a
-> matrix of stimulus–response associations maintained by outer-product plasticity and read out
+> The Dragon Hatchling (BDH) architecture is built on a fast-weight associative memory -- a
+> matrix of stimulus-response associations maintained by outer-product plasticity and read out
 > by similarity-weighted recall. We ask what this primitive is for: is it a value function, an
 > evaluative map from states to expected return, or a world model, a predictive map from states
 > to next states? We argue for the latter and settle the question empirically in a controlled
 > interception task, where a turn-rate-limited pursuer must catch a moving target. Three
 > findings emerge. (1) Used as a value function, the memory collapses: a linear TD learner with
-> the same associative readout reaches ~2–10% of the lead-pursuit ceiling, and backpropagated
+> the same associative readout reaches ~2-10% of the lead-pursuit ceiling, and backpropagated
 > DQN and PPO do not exceed the no-prediction reflex. (2) Used as a world model with greedy
 > lead-pursuit planning, the same memory reaches ~94% of the lead-pursuit ceiling. (3) On
-> persistently curving prey — where intercepting a trajectory, not a point velocity, is what
-> matters — the learned world model beats first- and second-order analytic extrapolation by 17%
+> persistently curving prey -- where intercepting a trajectory, not a point velocity, is what
+> matters -- the learned world model beats first- and second-order analytic extrapolation by 17%
 > and 193% respectively, because rolling forward the learned dynamics is more accurate than a
 > truncated Taylor series. We interpret the results as supporting a Dreamer-style division of
 > labor: fast-weight memories are best understood as predictive substrates trained by dense

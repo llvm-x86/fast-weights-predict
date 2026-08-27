@@ -1,8 +1,8 @@
 # Fast Weights Predict, Not Evaluate: A Hebbian Associative World Model for Interception
 
-**AUTHOR NAME(S) — replace before submission** (arXiv rejects anonymous submissions; see rubric item A1)
+**Gabriel Hill**
 
-*Affiliation · contact email · ORCID*
+*gabriel@familyfungroup.com*
 
 ## Abstract
 
@@ -416,8 +416,7 @@ tools](https://info.arxiv.org/help/moderation/index.html).
 
 **Code and data availability.** The benchmark, all experiment configurations, and the code to
 reproduce every number in this paper are available at
-`https://github.com/<USER>/<REPO>` (a public repository — **replace with the actual public URL
-before submission**; arXiv requires that code/data links resolve to a public repository).
+<https://github.com/llvm-x86/fast-weights-predict> (a public repository).
 
 ## References
 

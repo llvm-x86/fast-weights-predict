@@ -12,7 +12,7 @@ Legend: ✅ resolved · ⚠️ needs an input from you · ➖ not applicable
 
 | Item | Requirement | Status |
 |---|---|---|
-| A1 | **Title and authorship — no anonymous submissions** | ⚠️ Placeholder `Author Name Here` is set in `paper.tex` and `paper.md`. arXiv *rejects* anonymous submissions; put your real name(s), affiliation, and email before uploading. |
+| A1 | **Title and authorship — no anonymous submissions** | ✅ Byline set to Gabriel Hill (gabriel@familyfungroup.com) in `paper.tex` and `paper.md`. |
 | A2 | Carefully prepared sections, figures, tables, references | ✅ Title, Abstract, §1–§7, Table 1, 11 references, and a disclosures section are present. |
 | A3 | Professional, sufficiently neutral tone | ✅ No promotional or extraneous content. |
 | A4 | Originality, novelty, significance; no misrepresentation | ✅ Honest scope (toy domain stated explicitly). Fixed two internal inconsistencies: abstract said "~2% of *optimal* interception" (now "~2–10% of the *lead-pursuit ceiling*", matching the body), and the discretization ablation cited a no-reset reflex of ~1184 (now the correct reset-on-catch ~179). |
@@ -31,7 +31,7 @@ Legend: ✅ resolved · ⚠️ needs an input from you · ➖ not applicable
 | B3 | Machine readable | ✅ Standard LaTeX, no scanned text. |
 | B4 | No line numbers, watermarks, highlighted text, margin notes, referee remarks, slides, or obstructive copyright statements | ✅ None present. |
 | B5 | Complete references | ✅ 11 references; fixed the "T. Widrow" → "B. Widrow" error, aligned the Dreamer year (2023), replaced a `[citations]` placeholder with real pursuit refs, and added the BDH authors (Kosowski et al.). |
-| B6 | Code/data links must resolve to a **public** repository | ⚠️ Placeholder `https://github.com/<USER>/<REPO>` is set. Push the repo to GitHub (or another public host) and fill in the real URL in `paper.tex` and `paper.md`. |
+| B6 | Code/data links must resolve to a **public** repository | ✅ Published at <https://github.com/llvm-x86/fast-weights-predict>; URL referenced in `paper.tex` and `paper.md`. |
 
 ## C. Generative-AI policy (arXiv requires reporting, not prohibition)
 
@@ -43,14 +43,10 @@ Legend: ✅ resolved · ⚠️ needs an input from you · ➖ not applicable
 
 ## Before you upload
 
-1. Replace the author placeholder in `paper.tex` (line ~17) and `paper.md` (line 3) with your
-   real name, affiliation, and email.
-2. Push the repository to a public host and replace the `<USER>/<REPO>` placeholder in the
-   "Code and data availability" sections.
-3. Compile `paper.tex` to PDF and upload the **LaTeX source** (not the PDF alone, and never the
+1. Compile `paper.tex` to PDF and upload the **LaTeX source** (not the PDF alone, and never the
    `.md`) so arXiv can build it.
-4. If you get an endorsement prompt (common for new `cs.*` accounts), request an endorsement
+2. If you get an endorsement prompt (common for new `cs.*` accounts), request an endorsement
    from an existing arXiv contributor.
 
-The two remaining blockers are exactly A1 (your name) and B6 (the public repo URL). Everything
-else in the rubric is resolved.
+All rubric items are now resolved. The code is at
+<https://github.com/llvm-x86/fast-weights-predict>.

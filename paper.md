@@ -68,7 +68,7 @@ Our contributions are:
    than "lock-on," and a forecast-error metric that isolates prediction quality.
 3. **Empirical evidence** that (a) model-free value learning — including a linear TD learner
    using the *same* associative memory, a backprop DQN, and PPO — fails catastrophically on
-   interception, while (b) the same memory as a world model reaches near-optimal interception
+   interception, while (b) the same memory as a world model reaches $\sim\!94\%$ of the lead-pursuit ceiling
    and (c) beats first- and second-order analytic extrapolation on curved prey.
 
 We are explicit about scope: this is a controlled toy domain, not a benchmark suite, and its

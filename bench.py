@@ -328,8 +328,11 @@ def _make_circle_fit():
     return {'observe': observe, 'predict_at': predict_at, 'reset': reset}
 
 def make_predictor(name, rng):
+    lead_scale = 1.0
     if name == 'velocity-lead':
         pred = _make_velocity_lead()
+    elif name == 'velocity-lead-h':
+        pred = _make_velocity_lead(); lead_scale = 0.5
     elif name == 'accel-lead':
         pred = _make_accel_lead()
     elif name == 'kalman-lead':
@@ -340,6 +343,10 @@ def make_predictor(name, rng):
         pred = _make_bdh(rng, closed_loop=False)
     elif name == 'bdh-cl':
         pred = _make_bdh(rng, closed_loop=True)
+    elif name == 'bdh-r':
+        pred = _make_bdh(rng, closed_loop=False, reactive=True)
+    elif name == 'bdh-rd':
+        pred = _make_bdh(rng, closed_loop=False, reactive=True); lead_scale = 0.5
     elif name == 'wm-sgd':
         pred = _make_wm_sgd(rng)
     elif name == 'wm-rls':
@@ -354,7 +361,7 @@ def make_predictor(name, rng):
         pred = _make_bdh_ng(rng, pre=True, avg=False)
     else:
         raise ValueError('unknown predictor ' + name)
-    pred['predict_lead'] = lambda p, ch: pred['predict_at'](p, ch, lead_steps(p, ch))
+    pred['predict_lead'] = lambda p, ch: pred['predict_at'](p, ch, max(1, round(lead_steps(p, ch) * lead_scale)))
     return pred
 
 # ---------------- learned forward world models ----------------
@@ -400,13 +407,16 @@ def _wm_raw4(px, py, vx, vy, cx, cy):
 
 
 # --- BDH (Dragon Hatchling): error-gated Hebbian fast-weight memory ---
-def _make_bdh(rng, closed_loop=False):
+def _make_bdh(rng, closed_loop=False, reactive=False):
     R = 700.0
     VMAX = float(PREY_VMAX)
     M = int(os.environ.get('BDH_M', 0))
     eta = float(os.environ.get('BDH_ETA', 0.5))
     lam = float(os.environ.get('BDH_LAM', 1e-3))
-    RAW = 4
+    # reactive: append the distance and the unit bearing away from the chaser, so the
+    # linear readout can represent the evader's "turn toward away" map (atan2 of the
+    # relative position, which is nonlinear in the raw (dx, dy) alone).
+    RAW = 7 if reactive else 4
     D = 1 + RAW + 2 * M
     freq = [(rng['gauss']() * 1.4, rng['gauss']() * 1.4, rng['gauss']() * 1.4, rng['gauss']() * 1.4)
             for _ in range(M)]
@@ -415,9 +425,12 @@ def _make_bdh(rng, closed_loop=False):
     err_n = 0
 
     def raw(p, chaser):
-        return [wrap_delta(p['px'], chaser['cx'], W) / R,
-                wrap_delta(p['py'], chaser['cy'], H) / R,
-                p['vx'] / VMAX, p['vy'] / VMAX]
+        dx = wrap_delta(p['px'], chaser['cx'], W)
+        dy = wrap_delta(p['py'], chaser['cy'], H)
+        if reactive:
+            d = math.hypot(dx, dy) + 1e-3
+            return [dx / R, dy / R, d / R, dx / d, dy / d, p['vx'] / VMAX, p['vy'] / VMAX]
+        return [dx / R, dy / R, p['vx'] / VMAX, p['vy'] / VMAX]
 
     def phi(s):
         out = [0.0] * D
@@ -459,7 +472,13 @@ def _make_bdh(rng, closed_loop=False):
             WM[1][i] = WM[1][i] * wd + lr * ey * f[i]
 
     def fwd(px, py, vx, vy, cx, cy):
-        s = [wrap_delta(px, cx, W) / R, wrap_delta(py, cy, H) / R, vx / VMAX, vy / VMAX]
+        dx = wrap_delta(px, cx, W)
+        dy = wrap_delta(py, cy, H)
+        if reactive:
+            d = math.hypot(dx, dy) + 1e-3
+            s = [dx / R, dy / R, d / R, dx / d, dy / d, vx / VMAX, vy / VMAX]
+        else:
+            s = [dx / R, dy / R, vx / VMAX, vy / VMAX]
         f = phi(s)
         return _dot(WM[0], f) * VMAX, _dot(WM[1], f) * VMAX
 
@@ -1072,6 +1091,7 @@ NONSTATIONARY_PREY = ['flee', 'zigflee', 'adversarial']
 PREDICTORS = ['velocity-lead', 'accel-lead', 'kalman-lead', 'circle-fit', 'bdh', 'bdh-cl']
 WM_VARIANTS = ['bdh', 'wm-sgd', 'wm-rls', 'wm-mlp']
 WM_IMPROVED = ['bdh-ng', 'bdh-avg', 'bdh-pre']
+WM_REACTIVE = ['bdh-r', 'bdh-rd']
 POLICIES = ['pure-pursuit', 'mpc', 'linear-q', 'dqn', 'ppo', 'sac']
 
 def main():
@@ -1089,7 +1109,7 @@ def main():
     out.append('Protocol: reset-on-catch. Metric: catches per episode (mean ± sd over seeds).')
     out.append('')
 
-    all_preds = PREDICTORS + [p for p in WM_VARIANTS if p not in PREDICTORS] + WM_IMPROVED
+    all_preds = PREDICTORS + [p for p in WM_VARIANTS if p not in PREDICTORS] + WM_IMPROVED + WM_REACTIVE + ['velocity-lead-h']
     pred_data = {}
     for pt in PREY:
         for pr in all_preds:
@@ -1138,6 +1158,18 @@ def main():
     for pt in NONSTATIONARY_PREY:
         row = [f'| {pt}']
         for pr in ['velocity-lead', 'circle-fit', 'bdh', 'bdh-cl', 'wm-rls', 'bdh-ng']:
+            mean, sd = _mean_sd(pred_data[(pt, pr)])
+            row.append(f' {mean:.0f} ± {sd:.0f}')
+        out.append(' |'.join(row) + ' |')
+    out.append('')
+
+    out.append('## Reactive world model: bearing features and decorrelation-adapted lead (Result 6, mean ± sd, 10 seeds x 24000)')
+    out.append('')
+    out.append('| prey | velocity-lead | velocity-lead-h | bdh | bdh-r (bearing) | bdh-rd (bearing + short lead) | circle-fit |')
+    out.append('|---|---|---|---|---|---|---|')
+    for pt in NONSTATIONARY_PREY:
+        row = [f'| {pt}']
+        for pr in ['velocity-lead', 'velocity-lead-h', 'bdh', 'bdh-r', 'bdh-rd', 'circle-fit']:
             mean, sd = _mean_sd(pred_data[(pt, pr)])
             row.append(f' {mean:.0f} ± {sd:.0f}')
         out.append(' |'.join(row) + ' |')
@@ -1195,6 +1227,14 @@ def main():
         ('bdh', 'wm-rls', 'zigflee', 'BDH vs RLS', pred_data),
         ('bdh', 'wm-rls', 'adversarial', 'BDH vs RLS', pred_data),
         ('bdh-ng', 'wm-rls', 'adversarial', 'BDH-NG vs RLS', pred_data),
+        ('bdh-r', 'bdh', 'flee', 'BDH-r vs BDH', pred_data),
+        ('bdh-r', 'velocity-lead', 'flee', 'BDH-r vs velocity-lead', pred_data),
+        ('bdh-rd', 'velocity-lead', 'flee', 'BDH-rd vs velocity-lead', pred_data),
+        ('bdh-rd', 'velocity-lead', 'zigflee', 'BDH-rd vs velocity-lead', pred_data),
+        ('bdh-rd', 'velocity-lead', 'adversarial', 'BDH-rd vs velocity-lead', pred_data),
+        ('bdh-rd', 'bdh-r', 'flee', 'BDH-rd vs BDH-r', pred_data),
+        ('bdh-rd', 'circle-fit', 'flee', 'BDH-rd vs circle-fit', pred_data),
+        ('velocity-lead-h', 'velocity-lead', 'flee', 'velocity-lead-h vs velocity-lead', pred_data),
         ('sac', 'pure-pursuit', 'circling', 'SAC vs reflex', pol_data),
         ('dqn', 'pure-pursuit', 'circling', 'DQN vs reflex', pol_data),
     ]

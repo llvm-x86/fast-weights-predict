@@ -50,6 +50,27 @@ Protocol: reset-on-catch. Metric: catches per episode (mean ± sd over seeds).
 | zigflee | 227 ± 5 | 216 ± 4 | 208 ± 5 | 206 ± 4 | 138 ± 8 | 187 ± 5 |
 | adversarial | 161 ± 2 | 144 ± 1 | 146 ± 3 | 129 ± 9 | 51 ± 9 | 139 ± 3 |
 
+## Reactive world model: bearing features and decorrelation-adapted lead (Result 6, mean ± sd, 10 seeds x 24000)
+
+| prey | velocity-lead | velocity-lead-h | bdh | bdh-r | bdh-rd | circle-fit | bdh-cl | rls | bdh-ng |
+|---|---|---|---|---|---|---|---|---|---|
+| flee | 195 ± 3 | 204 ± 2 | 178 ± 3 | 197 ± 2 | 201 ± 2 | 178 ± 2 | 160 ± 7 | 86 ± 14 | 162 ± 2 |
+| zigflee | 227 ± 5 | 239 ± 2 | 208 ± 5 | 224 ± 5 | 237 ± 3 | 216 ± 4 | 206 ± 4 | 138 ± 8 | 187 ± 5 |
+| adversarial | 161 ± 2 | 168 ± 2 | 146 ± 3 | 161 ± 1 | 166 ± 1 | 144 ± 1 | 129 ± 9 | 51 ± 9 | 139 ± 3 |
+
+## New predictors on all prey (bdh-r / bdh-rd / velocity-lead-h, 10 seeds x 24000)
+
+| prey | bdh-r | bdh-rd | velocity-lead-h |
+|---|---|---|---|
+| const-vel | 405 ± 48 | 210 ± 47 | 208 ± 48 |
+| circling | 389 ± 37 | 329 ± 69 | 303 ± 55 |
+| ou-turn | 338 ± 16 | 276 ± 9 | 272 ± 9 |
+| ou-vel | 376 ± 12 | 298 ± 12 | 292 ± 10 |
+| jump | 302 ± 12 | 353 ± 11 | 361 ± 11 |
+| flee | 197 ± 2 | 201 ± 2 | 204 ± 2 |
+| zigflee | 224 ± 5 | 237 ± 3 | 239 ± 2 |
+| adversarial | 161 ± 1 | 166 ± 1 | 168 ± 2 |
+
 ## Policies (mean ± sd, reset-on-catch, 10 seeds x 20000)
 
 | prey | pure-pursuit | mpc | linear-q | dqn | ppo | sac |
@@ -101,6 +122,15 @@ Protocol: reset-on-catch. Metric: catches per episode (mean ± sd over seeds).
 | BDH-NG vs RLS | adversarial | 30.278 | 2.102e-12 |
 | SAC vs reflex | circling | -6.895 | 5.055e-05 |
 | DQN vs reflex | circling | -7.169 | 4.617e-05 |
+| BDH-r vs velocity-lead | flee | 1.165 | 0.2597 |
+| BDH-rd vs velocity-lead | flee | 5.447 | 5.77e-05 |
+| BDH-rd vs velocity-lead | zigflee | 5.701 | 3.074e-05 |
+| BDH-rd vs velocity-lead | adversarial | 6.895 | 3.713e-06 |
+| BDH-rd vs BDH-r | flee | 4.652 | 0.0002268 |
+| BDH-rd vs BDH-r | zigflee | 6.759 | 5.575e-06 |
+| BDH-rd vs circle-fit | flee | 23.103 | 2.918e-14 |
+| velocity-lead-h vs velocity-lead | flee | 7.292 | 1.152e-06 |
+| BDH-r vs BDH | flee | 16.224 | 3.59e-12 |
 
 ## Noise sweep (circling-noisy, BDH vs velocity-lead, 10 seeds x 24000)
 

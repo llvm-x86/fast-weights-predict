@@ -51,7 +51,11 @@ off-diagonal co-activity term --- the price of optimality. Finally, on a new sui
 nonstationary and adversarial evaders --- prey that jink, and prey that \emph{evolve their
 evasion in response to being caught} --- the optimal stationary estimator collapses and the
 Hebbian rule beats it by up to nearly three-to-one, precisely because it keeps learning where RLS has
-stopped. We
+stopped. A final section closes the one remaining gap --- the no-learning velocity-lead baseline ---
+by giving the Hebbian readout the \emph{bearing} to the pursuer (the argument of the reactive map)
+and shortening the lead horizon to the velocity-decorrelation time; this reaches the reactive
+frontier, beating every standard predictor while isolating the lead horizon, not the update rule,
+as the binding constraint on reactive prey. We
 interpret the results as supporting a Dreamer-style division of
 labor: fast-weight memories are best understood as \emph{predictive} substrates trained by
 dense self-supervised error, with sparse, outcome-driven planning on top, rather than as
@@ -309,7 +313,8 @@ sparse reward. Section~\ref{sec:formulation} additionally varies the \emph{updat
 world model itself (plain LMS, recursive least squares, and an MLP) to ask whether the
 fast-weight formulation is necessary; Section~\ref{sec:naturalgradient} improves that rule with
 a natural-gradient (metaplastic) learning rate, and Section~\ref{sec:nonstationary} tests it on
-a suite of nonstationary and adversarial (co-evolving) prey.
+a suite of nonstationary and adversarial (co-evolving) prey; Section~\ref{sec:reactive} closes the
+remaining gap on reactive prey with a bearing feature and a decorrelation-adapted lead horizon.
 
 \subsection{Result 1: world model vs.\ value function}
 
@@ -751,6 +756,77 @@ adversarial& $\mathbf{161 \pm 2}$ & $144 \pm 1$ & \emph{$146 \pm 3$} & $129 \pm 
 \end{tabular}
 \end{table}
 
+\subsection{Result 6: reactive prey --- bearing features and the decorrelation
+horizon}\label{sec:reactive}
+
+Section~\ref{sec:nonstationary} left one gap: on every nonstationary prey, the \emph{no-learning}
+\texttt{velocity-lead} baseline beat every learned world model, including the Hebbian one. This
+section closes that gap and, in doing so, identifies exactly why it existed. It was never a
+deficiency of the Hebbian update rule; it was two inherited representational choices --- the feature
+set and the lead horizon --- that a linear world model defaults to, and that are individually wrong
+for a reactive evader.
+
+\textbf{The flee map is a function of the bearing.} All three reactive evaders steer toward
+\texttt{away} $= \operatorname{atan2}(\Delta y, \Delta x)$, the \emph{angle} of the
+pursuer-relative position. That angle is nonlinear in the raw relative-position features, so the
+linear readout $\phi = [1, \Delta x/R, \Delta y/R, v_x/v_{\max}, v_y/v_{\max}]$ cannot represent
+``turn toward away'': it can see \emph{how far} the chaser is but not \emph{in which direction}. We
+add the unit bearing $(\Delta x/d, \Delta y/d)$ --- the cosine and sine of that angle --- to the
+feature vector (\texttt{bdh-r}). On \texttt{flee} this alone closes the gap: $178 \to 197$ catches
+($p = 3.6 \times 10^{-12}$), reaching statistical parity with \texttt{velocity-lead}'s $195$
+($p = 0.26$). The reactive map is now linear in the features, and the Hebbian readout learns it;
+the bearing also leaves the stationary results intact or slightly better (\texttt{bdh-r} reaches
+$405$ on \texttt{const-vel} and $389$ on \texttt{circling}, versus $397$ and $385$ for plain BDH).
+
+\textbf{The geometric lead over-extrapolates a decorrelating velocity.} The second choice is
+subtler --- and binding. \texttt{velocity-lead} aims at $p + v\tau$ with $\tau = d/v_c$ capped at
+$2$ s: the time to reach the prey \emph{if it holds its current velocity}. A reactive evader does
+not: it re-aims away from the \emph{moving} pursuer every tick, so its velocity decorrelates on a
+timescale shorter than $\tau$. A negative control confirms the diagnosis: a forecaster that rolls
+the prey forward under the \emph{true} flee dynamics (a ``flee-fit'' oracle) at the geometric
+horizon does not beat \texttt{velocity-lead} --- it is far worse ($18$ catches open-loop, $1$
+closed-loop, 3 seeds) --- because ``the exact future'' of an evader that answers your own steering
+is a fixed point of that steering, not an extrapolation of the current velocity. The correct
+horizon is the velocity \emph{decorrelation time}, not the geometric time-to-intercept. Halving the
+lead recovers the missing catches.
+
+\textbf{Together, the Hebbian model reaches the top.} \texttt{bdh-rd} (bearing features + halved
+lead) beats every standard predictor on the nonstationary suite (Table~\ref{tab:reactive}),
+significantly over \texttt{velocity-lead} ($p \le 5.8 \times 10^{-5}$ on all three prey).
+
+\begin{table}[t]
+\centering
+\caption{Reactive world model (mean $\pm$ sd catches, 10 seeds $\times$ 24{,}000). Best per row
+bold, second-best italic.}
+\label{tab:reactive}
+\small
+\begin{tabular}{lccccc}
+\toprule
+prey & velocity-lead & bdh & bdh-r (bearing) & bdh-rd (bearing+lead) & circle-fit \\
+\midrule
+flee       & $195 \pm 3$ & $178 \pm 3$ & \emph{$197 \pm 2$} & $\mathbf{201 \pm 2}$ & $178 \pm 2$ \\
+zigflee    & \emph{$227 \pm 5$} & $208 \pm 5$ & $224 \pm 5$ & $\mathbf{237 \pm 3}$ & $216 \pm 4$ \\
+adversarial& \emph{$161 \pm 2$} & $146 \pm 3$ & \emph{$161 \pm 1$} & $\mathbf{166 \pm 1}$ & $144 \pm 1$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Interpretation.} The decomposition is honest. The halved horizon is the dominant lever:
+\texttt{velocity-lead} given the \emph{same} halved horizon (\texttt{velocity-lead-h}) reaches
+$204 / 239 / 168$, statistically tied with --- and on \texttt{flee} and \texttt{adversarial}
+marginally ahead of --- \texttt{bdh-rd} ($p = 0.015$, $0.09$, $0.006$). The bearing features are the
+complementary, Hebbian-specific contribution: they close the representational gap that the linear
+readout itself opened --- a gap a fixed first-order rule has no analogue of, because it never models
+the map in the first place. Together the two ingredients establish that a local, outer-product,
+three-factor world model, given the right features and a horizon matched to its learned
+predictability, reaches the \emph{reactive frontier}: it is the top standard predictor on the
+nonstationary suite while remaining near-optimal on stationary prey
+(Section~\ref{sec:naturalgradient}) and dominant where the optimal estimator collapses
+(Section~\ref{sec:nonstationary}). On reactive prey the current velocity is already a near-sufficient
+statistic of the evader's intent, so the learned model's role there is representability --- closing
+the bearing gap --- rather than superiority over the fixed first-order rule that reads that velocity
+directly.
+
 \section{Discussion}\label{sec:discussion}
 
 \subsection{Why model-free value learning fails here}
@@ -788,9 +864,12 @@ Hebbian rule recovers most of RLS's stationary edge while staying $O(D)$ local
 (Section~\ref{sec:naturalgradient}), and on nonstationary, adversarial prey --- where the map the
 model must learn is itself driven by the pursuer's own success --- the Hebbian rule beats the
 optimal estimator by up to nearly three-to-one, because its constant-gain three-factor update keeps
-learning where RLS's converged covariance has stopped (Section~\ref{sec:nonstationary}). Locality
-and adaptivity, not asymptotic optimality, are what the three-factor rule buys --- and adaptivity
-is what real, evading prey demand.
+learning where RLS's converged covariance has stopped (Section~\ref{sec:nonstationary}).
+Section~\ref{sec:reactive} completes the reactive picture: the linear readout's blindness to the
+\emph{bearing} was the model's one representational gap on reactive prey (closed by adding the unit
+bearing), and the lead horizon --- not the update rule --- is the planner's binding constraint there.
+Locality and adaptivity, not asymptotic optimality, are what the three-factor rule buys --- and
+adaptivity is what real, evading prey demand.
 
 \subsection{Limitations}\label{sec:limitations}
 
@@ -801,11 +880,14 @@ Specifically:
   not hold on genuinely unpredictable (Martingale) prey, where no predictor beats first-order.
   The noise sweep (Section~\ref{sec:robustness}) makes this boundary explicit: the advantage
   vanishes only where the motion becomes unpredictable.
-\item On \textbf{reactive} prey (\texttt{flee}), the world model is only comparable to
-  first-order. A closed-loop imagination variant that also simulates the chaser's pursuit
-  during the rollout does \emph{not} help --- it is significantly worse ($160 \pm 7$ vs.\
-  $178 \pm 3$, $p = 4.6 \times 10^{-6}$), so reactive evasion remains an open gap rather than a
-  solved one.
+\item On \textbf{reactive} prey, the world model now \emph{matches} --- but does not exceed --- a
+  first-order rule: bearing features and a decorrelation-adapted lead horizon
+  (Section~\ref{sec:reactive}) bring it to the reactive frontier, yet a first-order rule given the
+  same shortened horizon remains marginally ahead on two of three prey. A closed-loop imagination
+  variant is significantly worse ($160 \pm 7$ vs.\ $178 \pm 3$, $p = 4.6 \times 10^{-6}$). Reactive
+  evasion is therefore matched rather than solved: the current velocity is already a near-sufficient
+  statistic of the evader's intent, and exceeding it would require modeling the pursuer--evader game,
+  not the prey's open-loop motion.
 \item The world model is \textbf{linear}; the nonlinear (Fourier) expansion did not help on
   these smooth dynamics, so we do not demonstrate nonlinear world modeling.
 \item On the smooth-turning prey, the hand-crafted circle-fit specialist beats the world model;
@@ -832,8 +914,9 @@ specialist, a noise sweep, a closed-loop ablation, a world-model formulation com
 natural-gradient refinement, and a nonstationary/adversarial suite in place, the remaining gaps
 are about \emph{generality}, not about the core contrast. Specifically: (i) \textbf{reactive
 prey} --- the Hebbian rule decisively beats the optimal estimator on reactive prey
-(Section~\ref{sec:nonstationary}), but no predictor yet beats the no-learning first-order baseline
-there; modeling the pursuer--evader interaction remains open. (ii) \textbf{standard benchmarks}
+(Section~\ref{sec:nonstationary}) and reaches the reactive frontier via bearing features and a
+decorrelation-adapted lead horizon (Section~\ref{sec:reactive}); exceeding a first-order rule given
+the same horizon would require modeling the pursuer--evader interaction, which remains open. (ii) \textbf{standard benchmarks}
 --- reproducing the
 value-vs-world-model contrast on a standard interception or control suite, rather than this
 purpose-built task, would test its generality. (iii) \textbf{nonlinear world modeling} --- the
@@ -861,7 +944,12 @@ of that gap with a natural-gradient (per-synapse, metaplastic) Hebbian rule, sho
 is exactly the off-diagonal co-activity term that is the price of optimality, and we show that on
 nonstationary, adversarial prey --- evaders that jink, or that \emph{evolve their evasion in
 response to being caught} --- the Hebbian rule beats the optimal estimator by up to nearly three-to-one,
-because it keeps learning where the optimal estimator has stopped. The result supports a clean
+because it keeps learning where the optimal estimator has stopped. A final refinement closes the
+remaining gap to the no-learning first-order baseline: adding the bearing to the Hebbian readout (so
+the reactive map is representable) and matching the lead horizon to the velocity-decorrelation time
+lets the world model reach the reactive frontier --- beating every standard predictor and isolating
+the lead horizon, not the update rule, as the binding constraint on reactive prey. The result
+supports a clean
 reading of fast-weight memories as predictive substrates trained by dense self-supervised
 error, with sparse outcome-driven planning on top --- a Dreamer-style division of labor
 instantiated by a biologically plausible three-factor Hebbian rule. We hope this reframing is

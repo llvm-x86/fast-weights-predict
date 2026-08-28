@@ -61,6 +61,9 @@ a biologically plausible three-factor Hebbian rule.
 | bdh-ng | predictor | natural-gradient (per-synapse) Hebbian world model + slow Polyak–Ruppert readout |
 | bdh-pre | predictor | natural-gradient (per-synapse) Hebbian world model, fast readout only |
 | bdh-avg | predictor | BDH (scalar NLMS) + slow Polyak–Ruppert-averaged readout |
+| bdh-r | predictor | BDH + unit bearing features (reactive map representable) |
+| bdh-rd | predictor | BDH + bearing features + halved lead (decorrelation-adapted) |
+| velocity-lead-h | predictor | velocity-lead with halved lead horizon (ablation) |
 | pure-pursuit | policy | steer at current prey (reflex, no prediction) |
 | MPC | policy | model-based search over 8 headings (first-order prey model) |
 | linear-Q | policy | linear FA + TD(0) + ε-greedy (the evaluative reading) |
@@ -119,15 +122,25 @@ A **nonstationary/adversarial suite** (§5.8, Table 6) adds two co-evolving evad
 (a flee-er that periodically re-samples a random jink) and `adversarial` (an "evolve-as-you-evolve"
 prey whose evasiveness rises each time it is caught and decays while it escapes). On every
 reactive prey, RLS — the winner on stationary prey — is the *worst* world model, and BDH beats it
-by up to ~4× (largest on `adversarial`, where the prey adapts to the pursuer's own success).
+by nearly three-to-one (largest on `adversarial`, where the prey adapts to the pursuer's own success).
+
+A **reactive refinement** (§5.9, Table 7) closes the last gap on the nonstationary suite. The
+reactive evaders' map is a function of the *bearing* (`atan2` of the relative position), which the
+linear feature set cannot represent; adding the unit bearing (`bdh-r`) closes the gap to
+velocity-lead (178→197 on `flee`, parity). The remaining lever is the *lead horizon*: a reactive
+evader re-aims away from the moving pursuer, so its velocity decorrelates faster than the geometric
+lead `τ=d/vc` assumes; halving the lead (`bdh-rd`) beats velocity-lead on all three nonstationary
+prey (p ≤ 5.8e-5). The honest decomposition: the halved horizon is the dominant lever
+(`velocity-lead-h` reaches 204/239/168), while the bearing features are the Hebbian-specific fix
+that closes the representational gap.
 
 ## Limitations
 
 The result is strongest on curved, predictable motion — the case where predicting a
 *trajectory*, not a point velocity, matters. On genuinely unpredictable (Martingale)
-motion no predictor beats first-order; on reactive (`flee`) prey neither open-loop nor
-closed-loop imagination beats first-order; and a hand-crafted circle-fitter remains the
-specialist ceiling on smooth curved motion. The world model is a linear associative
+motion no predictor beats first-order; on reactive prey the world model reaches — but does not
+exceed — a first-order rule (bearing features + decorrelation-adapted lead, §5.9); and a
+hand-crafted circle-fitter remains the specialist ceiling on smooth curved motion. The world model is a linear associative
 memory (the nonlinear Fourier expansion did not help on these smooth dynamics). See
 §6.3–6.4 of `paper.md` for the full discussion and future work.
 

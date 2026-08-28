@@ -13,9 +13,9 @@ Legend: ✅ resolved · ⚠️ needs an input from you · ➖ not applicable
 | Item | Requirement | Status |
 |---|---|---|
 | A1 | **Title and authorship — no anonymous submissions** | ✅ Byline set to Gabriel Hill (gabriel@familyfungroup.com) in `paper.tex` and `paper.md`. |
-| A2 | Carefully prepared sections, figures, tables, references | ✅ Title, Abstract, §1–§7, Table 1, 11 references, and a disclosures section are present. |
+| A2 | Carefully prepared sections, figures, tables, references | ✅ Title, Abstract, §1–§7, Tables 1–3, 12 references, and a disclosures section are present. |
 | A3 | Professional, sufficiently neutral tone | ✅ No promotional or extraneous content. |
-| A4 | Originality, novelty, significance; no misrepresentation | ✅ Honest scope (toy domain stated explicitly). Fixed two internal inconsistencies: abstract said "~2% of *optimal* interception" (now "~2–10% of the *lead-pursuit ceiling*", matching the body), and the discretization ablation cited a no-reset reflex of ~1184 (now the correct reset-on-catch ~179). |
+| A4 | Originality, novelty, significance; no misrepresentation | ✅ Honest scope (toy domain stated explicitly). All numbers reproduce from `bench.py` (10 seeds); abstract and body percentages trace to Table 1; the effective prey speed is documented as the 160 px/s `PREY_VMAX` cap. |
 | A5 | Original work; no plagiarism; legal right to license | ✅ Original benchmark; the BDH paper is cited, not reproduced. |
 | A6 | Fits a served category | ✅ Fits `cs.LG` / `cs.NE` / `cs.AI`. Note: new arXiv accounts in `cs.*` may need an **endorsement** before the first submission — request one if prompted. |
 | A7 | No duplicated/versioned look-alike submissions | ➖ Single submission. |
@@ -26,11 +26,11 @@ Legend: ✅ resolved · ⚠️ needs an input from you · ➖ not applicable
 
 | Item | Requirement | Status |
 |---|---|---|
-| B1 | LaTeX (or PDF) source — **Markdown is not accepted** | ✅ `paper.tex` (11pt article, `amsmath`/`booktabs`/`hyperref`) compiles cleanly to `paper.pdf` (9 pages, letter, 1" margins; zero errors, zero undefined references). |
+| B1 | LaTeX (or PDF) source — **Markdown is not accepted** | ✅ `paper.tex` (11pt article, `amsmath`/`booktabs`/`hyperref`) compiles cleanly to `paper.pdf` (11 pages, letter, 1" margins; zero errors, zero undefined references). |
 | B2 | Single-spaced, 10–14pt type, ≥ 1" margins | ✅ `\documentclass[11pt]{article}` + `geometry[margin=1in]`. |
 | B3 | Machine readable | ✅ Standard LaTeX, no scanned text. |
 | B4 | No line numbers, watermarks, highlighted text, margin notes, referee remarks, slides, or obstructive copyright statements | ✅ None present. |
-| B5 | Complete references | ✅ 11 references; fixed the "T. Widrow" → "B. Widrow" error, aligned the Dreamer year (2023), replaced a `[citations]` placeholder with real pursuit refs, and added the BDH authors (Kosowski et al.). |
+| B5 | Complete references | ✅ 12 references (incl. SAC, Haarnoja et al.\ 2018); Frémaux & Gerstner cited uniformly as 2015; B. Widrow and BDH authors (Kosowski et al.) verified. |
 | B6 | Code/data links must resolve to a **public** repository | ✅ Published at <https://github.com/llvm-x86/fast-weights-predict>; URL referenced in `paper.tex` and `paper.md`. |
 
 ## C. Generative-AI policy (arXiv requires reporting, not prohibition)
@@ -49,7 +49,7 @@ Legend: ✅ resolved · ⚠️ needs an input from you · ➖ not applicable
   Evolutionary Computing) and `cs.AI` (Artificial Intelligence).
 - **License:** arXiv's default non-exclusive distribution license (or `CC BY 4.0` if you want
   open reuse -- your choice).
-- **Comments (optional):** `9 pages, 0 figures. Code: https://github.com/llvm-x86/fast-weights-predict`
+- **Comments (optional):** `11 pages, 3 tables. Code: https://github.com/llvm-x86/fast-weights-predict`
 
 **Abstract (plain ASCII text, for the metadata field — arXiv metadata rejects Unicode):**
 
@@ -58,23 +58,28 @@ Legend: ✅ resolved · ⚠️ needs an input from you · ➖ not applicable
 > by similarity-weighted recall. We ask what this primitive is for: is it a value function, an
 > evaluative map from states to expected return, or a world model, a predictive map from states
 > to next states? We argue for the latter and settle the question empirically in a controlled
-> interception task, where a turn-rate-limited pursuer must catch a moving target. Three
-> findings emerge. (1) Used as a value function, the memory collapses: a linear TD learner with
-> the same associative readout reaches ~2-10% of the lead-pursuit ceiling, and backpropagated
-> DQN and PPO do not exceed the no-prediction reflex. (2) Used as a world model with greedy
-> lead-pursuit planning, the same memory reaches ~94% of the lead-pursuit ceiling. (3) On
-> persistently curving prey -- where intercepting a trajectory, not a point velocity, is what
-> matters -- the learned world model beats first- and second-order analytic extrapolation by 17%
-> and 193% respectively, because rolling forward the learned dynamics is more accurate than a
-> truncated Taylor series. We interpret the results as supporting a Dreamer-style division of
-> labor: fast-weight memories are best understood as predictive substrates trained by dense
-> self-supervised error, with sparse, outcome-driven planning on top, rather than as
-> value-function approximators.
+> interception task, where a turn-rate-limited pursuer must catch a moving target, with ten
+> seeds per cell and Welch significance tests. Three findings emerge. (1) Used as a value
+> function, the memory collapses: a linear TD learner with the same associative readout reaches
+> 0-24 catches -- under 7% of the best analytic predictor in every environment -- and
+> backpropagated DQN, PPO, and continuous-action SAC all fall below the no-prediction reflex on
+> every environment. (2) Used as a world model with greedy lead-pursuit planning, the same
+> memory reaches 87-99% of the best analytic predictor in every environment, and 92% of a
+> hand-crafted circle-fitter on the curved prey that fitter specializes to. (3) On persistently
+> curving prey -- where intercepting a trajectory, not a point velocity, is what matters -- the
+> learned world model beats first- and second-order analytic extrapolation by 17% and 195%
+> respectively, because rolling forward the learned dynamics is more accurate than a truncated
+> Taylor series. The advantage is significant under a two-sided Welch test, survives a noise
+> sweep (vanishing only where the motion becomes genuinely unpredictable), and a closed-loop
+> imagination variant does not help -- pointing to a robust effect. We interpret the results as
+> supporting a Dreamer-style division of labor: fast-weight memories are best understood as
+> predictive substrates trained by dense self-supervised error, with sparse, outcome-driven
+> planning on top, rather than as value-function approximators.
 
 ## Before you upload
 
 1. Upload the **LaTeX source** (`paper.tex`, not the `.md`, and not the PDF alone) so arXiv can
-   build it. The PDF has already been compiled and verified locally (`paper.pdf`, 9 pages).
+   build it. The PDF has already been compiled and verified locally (`paper.pdf`, 11 pages).
 2. If you get an endorsement prompt (common for new `cs.*` accounts), request an endorsement
    from an existing arXiv contributor.
 

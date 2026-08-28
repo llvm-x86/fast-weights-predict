@@ -27,18 +27,24 @@ matrix of stimulus--response associations maintained by outer-product plasticity
 by similarity-weighted recall. We ask what this primitive is \emph{for}: is it a value
 function, an evaluative map from states to expected return, or a world model, a predictive map
 from states to next states? We argue for the latter and settle the question empirically in a
-controlled interception task, where a turn-rate-limited pursuer must catch a moving target.
-Three findings emerge. \textbf{(1)} Used as a value function, the memory collapses: a linear
-TD learner with the same associative readout reaches $\sim\!2$--$10\%$ of the lead-pursuit
-ceiling, and backpropagated DQN and PPO do not exceed the \emph{no-prediction reflex}.
-\textbf{(2)} Used as a world model with greedy lead-pursuit planning, the same memory reaches
-$\sim\!94\%$ of the lead-pursuit ceiling. \textbf{(3)} On persistently curving prey --- where
-intercepting a trajectory, not a point velocity, is what matters --- the learned world model
-beats first- and second-order analytic extrapolation by $17\%$ and $193\%$ respectively,
-because rolling forward the learned dynamics is more accurate than a truncated Taylor series.
-We interpret the results as supporting a Dreamer-style division of labor: fast-weight memories
-are best understood as \emph{predictive} substrates trained by dense self-supervised error,
-with sparse, outcome-driven planning on top, rather than as value-function approximators.
+controlled interception task, where a turn-rate-limited pursuer must catch a moving target,
+with ten seeds per cell and Welch significance tests. Three findings emerge.
+\textbf{(1)} Used as a value function, the memory collapses: a linear TD learner with the same
+associative readout reaches $0$--$24$ catches --- under $7\%$ of the best analytic predictor in
+every environment --- and backpropagated DQN, PPO, and continuous-action SAC all fall
+\emph{below the no-prediction reflex on every environment}. \textbf{(2)} Used as a world model
+with greedy lead-pursuit planning, the same memory reaches $87$--$99\%$ of the best analytic
+predictor in every environment, and $92\%$ of a hand-crafted circle-fitter on the curved prey
+that fitter specializes to. \textbf{(3)} On persistently curving prey --- where intercepting a
+trajectory, not a point velocity, is what matters --- the learned world model beats first- and
+second-order analytic extrapolation by $17\%$ and $195\%$ respectively, because rolling forward
+the learned dynamics is more accurate than a truncated Taylor series. The advantage is
+significant under a two-sided Welch test, survives a noise sweep (vanishing only where the
+motion becomes genuinely unpredictable), and a closed-loop imagination variant does not help ---
+pointing to a robust effect. We interpret the results as supporting a Dreamer-style division of
+labor: fast-weight memories are best understood as \emph{predictive} substrates trained by
+dense self-supervised error, with sparse, outcome-driven planning on top, rather than as
+value-function approximators.
 \end{abstract}
 
 \section{Introduction}\label{sec:intro}
@@ -64,7 +70,7 @@ to very different systems:
 
 These readings are not cosmetic: they make opposite claims about the role of the same
 plasticity rule. The BDH paper's own framing --- and the broader literature on reward-modulated
-Hebbian learning \cite{fremaux2016} --- has tended toward the evaluative reading. We argue the
+Hebbian learning \cite{fremaux2015} --- has tended toward the evaluative reading. We argue the
 predictive reading is the correct one, and we support the argument with a controlled
 experiment.
 
@@ -84,10 +90,12 @@ Our contributions are:
   and model-free baselines, a reset-on-catch protocol that measures genuine interception
   rather than ``lock-on,'' and a forecast-error metric that isolates prediction quality.
 \item \textbf{Empirical evidence} that (a) model-free value learning --- including a linear TD
-  learner using the \emph{same} associative memory, a backprop DQN, and PPO --- fails
-  catastrophically on interception, while (b) the same memory as a world model reaches
-  $\sim\!94\%$ of the lead-pursuit ceiling and (c) beats first- and second-order analytic
-  extrapolation on curved prey.
+  learner using the \emph{same} associative memory, a backprop DQN, PPO, and continuous-action
+  SAC --- fails catastrophically on interception (falling \emph{below the no-prediction reflex}
+  in every environment), while (b) the same memory as a world model reaches $87$--$99\%$ of the
+  best analytic predictor per environment and (c) beats first- and second-order analytic
+  extrapolation on curved prey, with a closed-loop imagination ablation and a noise sweep
+  delimiting the claim.
 \end{enumerate}
 
 We are explicit about scope: this is a controlled toy domain, not a benchmark suite, and its
@@ -107,7 +115,7 @@ represent.
 \textbf{Hebbian and three-factor learning.} Classical Hebbian learning co-activates pre- and
 post-synaptic units ($\Delta W \propto y x^\top$). Three-factor rules gate this plasticity by a
 third, neuromodulatory signal (e.g., reward or prediction error), yielding biologically
-plausible and provably convergent variants \cite{fremaux2016}. The delta (Widrow--Hoff / LMS)
+plausible and provably convergent variants \cite{fremaux2015}. The delta (Widrow--Hoff / LMS)
 rule $W \leftarrow W + \eta\,\delta\,x^\top$, where $\delta$ is the prediction error, is
 precisely such a three-factor rule \cite{widrow1960}; we use its normalized form.
 
@@ -139,8 +147,9 @@ $48$ px; a $0.5$ s cooldown follows before the next catch can register.
 \begin{itemize}
 \item \textbf{Chaser.} Constant top speed $v_c = 175$ px/s. Its heading changes at a rate
   bounded by $\omega_{\max} = 3.6$ rad/s (a \emph{turn-rate clamp}). It cannot decelerate.
-\item \textbf{Prey.} Speed $165$ px/s ($0.94\times$ the chaser), so the chaser cannot win by
-  raw speed --- it must \emph{intercept}. Six dynamics (Table~\ref{tab:results}, top):
+\item \textbf{Prey.} Speed $160$ px/s ($0.91\times$ the chaser; the \texttt{const-vel} prey
+  moves at the configured $165$ px/s), so the chaser cannot win by raw speed --- it must
+  \emph{intercept}. Six dynamics (Table~\ref{tab:results}, top):
   \begin{itemize}
   \item \texttt{const-vel} --- constant velocity (linear; first-order extrapolation is exact).
   \item \texttt{circling} --- constant turn rate $\dot\theta \in \pm 1.2$ rad/s drawn per
@@ -151,6 +160,9 @@ $48$ px; a $0.5$ s cooldown follows before the next catch can register.
   \item \texttt{flee} --- reactive avoidance: steers away from the chaser and speeds up when
     approached.
   \end{itemize}
+A seventh variant, \texttt{circling-noisy}, augments \texttt{circling} with
+Ornstein--Uhlenbeck noise on the turn rate and is used only in the noise sweep
+(Section~\ref{sec:robustness}).
 \end{itemize}
 
 The first two are the scientifically decisive pair: \texttt{const-vel} is where first-order
@@ -244,11 +256,10 @@ representational capacity.
 
 \subsection{Setup}
 
-All results are seeded and reproducible; each cell is a mean over seeds (10 for predictors, 3
-for the slower model-free learners) with standard deviation. Hyperparameters were not tuned
-per-environment except where an ablation explicitly varies them. The BDH world model uses the
-linear feature set (Section~\ref{sec:method}), learning rate $\eta = 0.1$, and weight decay
-$\lambda = 10^{-3}$.
+All results are seeded and reproducible; every cell is a mean over 10 seeds with standard
+deviation. Hyperparameters were not tuned per-environment except where an ablation explicitly
+varies them. The BDH world model uses the linear feature set (Section~\ref{sec:method}),
+learning rate $\eta = 0.5$, and weight decay $\lambda = 10^{-3}$.
 
 \textbf{Baselines.}
 \begin{itemize}
@@ -258,7 +269,13 @@ $\lambda = 10^{-3}$.
   \item \texttt{accel-lead}: $\hat p = p + v\tau + \tfrac12 a \tau^2$ (second-order Taylor,
     $a$ from a finite-difference estimate).
   \item \texttt{kalman-lead}: a constant-velocity Kalman filter + lead.
-  \item \texttt{bdh}: the fast-weight world model (Section~\ref{sec:method}).
+  \item \texttt{circle-fit}: a least-squares circle fitted to the recent trajectory (Kasa
+    normal equations), then extrapolated along the fitted circle --- an analytic
+    \emph{specialist} with the exact circular inductive bias.
+  \item \texttt{bdh}: the fast-weight world model (Section~\ref{sec:method}), rolled forward
+    with the chaser held fixed (open loop).
+  \item \texttt{bdh-cl}: the same world model rolled forward while the chaser is also imagined
+    to pursue (closed loop).
   \end{itemize}
 \item \emph{Policies} (learn or select the heading directly):
   \begin{itemize}
@@ -270,6 +287,8 @@ $\lambda = 10^{-3}$.
     reading).
   \item \texttt{dqn}: an MLP Q-network with replay buffer and target network.
   \item \texttt{ppo}: clipped-surrogate PPO with policy and value MLPs.
+  \item \texttt{sac}: Soft Actor-Critic with a continuous turn-rate action (reparameterized
+    actor, twin critics, fixed entropy coefficient $\alpha = 0.1$).
   \end{itemize}
 \end{itemize}
 
@@ -284,13 +303,15 @@ contrast is stark and consistent across all six environments:
 
 \begin{itemize}
 \item The \textbf{linear-Q learner --- the same associative memory used as a value function ---
-  collapses} to $0$--$27$ catches, roughly $2$--$10\%$ of the lead-pursuit ceiling.
-\item The \textbf{backprop DQN and PPO} do not exceed the \emph{no-prediction reflex}: on most
-  environments they are \emph{worse} than pure pursuit, which does no learning and no
-  prediction at all.
-\item The \textbf{BDH world model}, by contrast, reaches $165$--$384$ catches ---
-  $\sim\!94\%$ of the lead-pursuit ceiling --- with a fraction of the training and no value
-  function.
+  collapses} to $0$--$24$ catches, under $7\%$ of the best analytic predictor in each
+  environment.
+\item The \textbf{backprop DQN, PPO, and continuous-action SAC all fall \emph{below the
+  no-prediction reflex}} (pure pursuit) in \emph{every} environment: they do worse than a
+  policy that does no learning and no prediction at all. This failure is not an artifact of
+  discrete actions, since SAC's action space is continuous.
+\item The \textbf{BDH world model}, by contrast, reaches $165$--$383$ catches --- $87$--$99\%$
+  of the best analytic predictor per environment --- with no value function and a fraction of
+  the training.
 \end{itemize}
 
 Because linear-Q and the world model use the \emph{same} features and the \emph{same}
@@ -299,63 +320,81 @@ associative substrate, the gap is clean evidence that the fast-weight memory suc
 
 \begin{table}[t]
 \centering
-\caption{Catches per episode (mean $\pm$ sd), reset-on-catch. \emph{Top:} lead-pursuit
-predictors (10 seeds $\times$ 24{,}000 steps). \emph{Bottom:} policies (3 seeds $\times$
+\caption{Catches per episode (mean $\pm$ sd), reset-on-catch, 10 seeds. \emph{Top:}
+lead-pursuit predictors ($\times$ 24{,}000 steps). \emph{Bottom:} policies ($\times$
 20{,}000 steps).}
 \label{tab:results}
 \small
-\begin{tabular}{lcccc}
+\begin{tabular}{lcccccc}
 \toprule
-prey & velocity-lead & accel-lead & kalman-lead & \textbf{BDH (world model)} \\
+prey & velocity-lead & accel-lead & kalman-lead & circle-fit & \textbf{bdh} & bdh-cl \\
 \midrule
-const-vel & $364 \pm 57$ & $364 \pm 57$ & $148 \pm 50$ & $\mathbf{363 \pm 53}$ \\
-circling  & $327 \pm 35$ & $131 \pm 192$ & $35 \pm 66$ & $\mathbf{384 \pm 38}$ \\
-ou-turn   & $368 \pm 17$ & $364 \pm 10$ & $116 \pm 7$ & $330 \pm 11$ \\
-ou-vel    & $388 \pm 8$ & $385 \pm 15$ & $136 \pm 16$ & $364 \pm 12$ \\
-jump      & $342 \pm 10$ & $293 \pm 8$ & $133 \pm 10$ & $298 \pm 11$ \\
-flee      & $182 \pm 2$ & $69 \pm 7$ & $6 \pm 3$ & $165 \pm 5$ \\
+const-vel & $364 \pm 57$ & $363 \pm 56$ & $148 \pm 50$ & $232 \pm 48$ & $\mathbf{363 \pm 53}$ & $358 \pm 58$ \\
+circling  & $327 \pm 35$ & $130 \pm 192$ & $35 \pm 66$ & $415 \pm 15$ & $\mathbf{383 \pm 38}$ & $383 \pm 46$ \\
+ou-turn   & $368 \pm 17$ & $364 \pm 10$ & $116 \pm 7$ & $373 \pm 11$ & $\mathbf{327 \pm 6}$ & $332 \pm 11$ \\
+ou-vel    & $388 \pm 8$ & $385 \pm 15$ & $136 \pm 16$ & $388 \pm 18$ & $\mathbf{362 \pm 12}$ & $362 \pm 14$ \\
+jump      & $342 \pm 10$ & $293 \pm 8$ & $133 \pm 10$ & $282 \pm 6$ & $\mathbf{298 \pm 11}$ & $274 \pm 6$ \\
+flee      & $182 \pm 2$ & $68 \pm 7$ & $6 \pm 3$ & $162 \pm 2$ & $\mathbf{165 \pm 5}$ & $147 \pm 14$ \\
 \bottomrule
 \end{tabular}
 
 \bigskip
 
-\begin{tabular}{lccccc}
+\begin{tabular}{lcccccc}
 \toprule
-prey & pure-pursuit & mpc & linear-q & dqn & ppo \\
+prey & pure-pursuit & mpc & linear-q & dqn & ppo & sac \\
 \midrule
-const-vel & $60 \pm 10$ & $242 \pm 33$ & $19 \pm 6$ & $30 \pm 28$ & $18 \pm 5$ \\
-circling  & $179 \pm 52$ & $254 \pm 42$ & $22 \pm 5$ & $41 \pm 5$ & $23 \pm 5$ \\
-ou-turn   & $129 \pm 10$ & $286 \pm 23$ & $25 \pm 6$ & $29 \pm 4$ & $23 \pm 1$ \\
-ou-vel    & $137 \pm 11$ & $304 \pm 10$ & $27 \pm 5$ & $29 \pm 3$ & $21 \pm 9$ \\
-jump      & $254 \pm 8$ & $265 \pm 11$ & $20 \pm 2$ & $44 \pm 9$ & $23 \pm 7$ \\
-flee      & $160 \pm 1$ & $140 \pm 3$ & $0 \pm 1$ & $37 \pm 9$ & $8 \pm 8$ \\
+const-vel & $57 \pm 6$ & $242 \pm 34$ & $21 \pm 6$ & $23 \pm 13$ & $29 \pm 12$ & $22 \pm 20$ \\
+circling  & $176 \pm 67$ & $256 \pm 31$ & $20 \pm 6$ & $20 \pm 5$ & $18 \pm 5$ & $29 \pm 12$ \\
+ou-turn   & $134 \pm 10$ & $269 \pm 21$ & $24 \pm 5$ & $18 \pm 5$ & $24 \pm 5$ & $24 \pm 4$ \\
+ou-vel    & $134 \pm 7$ & $301 \pm 11$ & $21 \pm 6$ & $20 \pm 6$ & $23 \pm 6$ & $25 \pm 6$ \\
+jump      & $252 \pm 10$ & $261 \pm 8$ & $20 \pm 3$ & $25 \pm 4$ & $22 \pm 4$ & $32 \pm 10$ \\
+flee      & $159 \pm 2$ & $139 \pm 3$ & $0 \pm 0$ & $1 \pm 2$ & $0 \pm 0$ & $4 \pm 4$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The clean ordering across approaches is \emph{pure-pursuit (reflex) < MPC (first-order search)
-< velocity-lead (first-order, continuous) < BDH (learned world model)} on five of six
-environments, with model-free value learning (linear-Q, DQN, PPO) \emph{below the reflex}
-everywhere. Prediction and a learned model both matter, and planning with a model decisively
-beats learning a value function. (On \texttt{flee}, where a first-order model is wrong, MPC
-falls below the reflex --- the \emph{model}, not the \emph{planner}, is the limiting factor.)
+The world model's advantage is specific and predictable: it \emph{ties} first-order on linear
+motion (\texttt{const-vel}, as it should for a linear model), \emph{beats} first-order
+decisively on curved motion (\texttt{circling}, $+17\%$), and falls \emph{slightly below}
+first-order on the stochastic and reactive prey (\texttt{ou-*}, \texttt{jump}, \texttt{flee})
+where the future is only partially predictable from the current state and the learned model
+adds variance. Across all six environments the world model stays within $13\%$ of the
+\emph{best} analytic predictor for that environment. By contrast, model-free value learning
+(linear-Q, DQN, PPO, SAC) is \emph{below the reflex} everywhere, and MPC --- a planner with a
+first-order model --- decisively beats all of them. Prediction matters, and a learned
+predictive model is competitive with the analytic frontier exactly where the motion is smooth
+and curved.
 
 \subsection{Result 2: world model vs.\ analytic extrapolation on curved prey}
 
 On \texttt{circling} (Table~\ref{tab:results}, top), the BDH world model achieves
-$384 \pm 38$ catches, \textbf{$+17\%$} over first-order extrapolation ($327 \pm 35$) and
-\textbf{$+193\%$} over second-order ($131 \pm 192$). The second-order baseline is also wildly
-unreliable --- its standard deviation ($192$) is larger than its mean --- whereas the world
-model is stable ($\pm 38$).
+$383 \pm 38$ catches, \textbf{$+17\%$} over first-order extrapolation ($327 \pm 35$) and
+\textbf{$+195\%$} over second-order ($130 \pm 192$). Both advantages are significant under a
+two-sided Welch test ($t = 3.46$, $p = 0.003$ vs.\ first-order; $t = 4.08$, $p = 0.002$ vs.\
+second-order). The second-order baseline is also wildly unreliable --- its standard deviation
+($192$) is larger than its mean --- whereas the world model is stable ($\pm 38$).
 
-The mechanism is visible in the forecast error: on \texttt{circling} the world model's
-lead-horizon forecast error is $\sim\!62$--$69$ px versus $\sim\!81$--$100$ px for first-order.
-Rolling forward the learned rotation tracks the arc; a straight-line extrapolation (first-order)
-misses it, and a parabola (second-order) \emph{overshoots} it over the $\sim\!2$ s lead horizon
---- the $\tfrac12 a \tau^2$ term of a second-order Taylor expansion diverges from a circle. A
-learned model that re-applies the true (learned) one-step dynamics at each of $\tau$ steps is
-the correct object, and the fast-weight memory discovers it from raw observations without being
-told the prey is circling.
+The mechanism is visible in the forecast error. On \texttt{circling}, the world model's
+lead-horizon forecast error is $60 \pm 12$ px versus $96 \pm 51$ px for first-order
+extrapolation: rolling forward the learned rotation tracks the arc, while a straight-line
+extrapolation misses it. The second-order baseline is a cautionary tale --- its \emph{mean}
+forecast error ($54$ px) is deceptively low, but its variance ($\pm 43$ px) is enormous: the
+$\tfrac12 a \tau^2$ term of a second-order Taylor expansion \emph{overshoots} the circle over
+the $\sim\!2$ s lead horizon, and a single bad forecast during the final approach costs the
+catch. A learned model that re-applies the true (learned) one-step dynamics at each of $\tau$
+steps is the correct object, and the fast-weight memory discovers it from raw observations
+without being told the prey is circling.
+
+The circle-fit specialist is the one analytic baseline that edges out the world model on
+\texttt{circling} ($415 \pm 15$ vs.\ $383 \pm 38$, $p = 0.026$): its forecast error is
+$11 \pm 6$ px, near-perfect, because it is handed the exact circular inductive bias. It also
+transfers to the smooth-turning OU prey (\texttt{ou-turn} $373$, \texttt{ou-vel} $388$) but
+collapses on straight (\texttt{const-vel} $232$) and discontinuous (\texttt{jump} $282$)
+motion, where a circle is the wrong object. The world model, by contrast, is a
+\emph{generalist}: it reaches $92\%$ of the specialist on \texttt{circling} and beats the
+specialist on \texttt{const-vel} ($363$ vs.\ $232$), \texttt{jump} ($298$ vs.\ $282$), and
+\texttt{flee} ($165$ vs.\ $162$).
 
 On \texttt{const-vel} the world model ties first-order (as it should: the dynamics are linear,
 and a linear model reproduces them exactly), confirming the model adds no spurious advantage. On
@@ -365,27 +404,94 @@ of variance. These are the honest negative results that delimit the claim.
 
 \subsection{Ablations}\label{sec:ablations}
 
-We verify the result is not fragile. (All ablations on \texttt{circling}, reset-on-catch.)
+We verify the result is not fragile. (All ablations on \texttt{circling}, reset-on-catch, 10
+seeds.)
 
 \begin{itemize}
 \item \textbf{Turn-rate clamp} ($1.8 \to 5.4$ rad/s): BDH beats first-order at \emph{every}
-  turn rate ($262/288/306/312$ vs.\ $219/273/280/283$), so the advantage is not an artifact of
+  turn rate ($334/374/383/392$ vs.\ $261/315/327/336$), so the advantage is not an artifact of
   the clamp's value.
-\item \textbf{Speed ratio} (prey $150/165/180$ vs.\ chaser $175$): BDH is robust
-  ($322/306/294$). Second-order only competes at slow prey ($336$ at $150$) and collapses at
-  $165+$ ($140$) as its parabola overshoots.
+\item \textbf{Speed ratio} (prey $140/150/160$ px/s vs.\ chaser $175$): BDH is robust
+  ($411/401/385$). Second-order only competes at slow prey ($416$ at $140$) and collapses at
+  $160$ ($130$) as its parabola overshoots a fast circle. (Prey speed is capped at the
+  $160$ px/s \texttt{PREY\_VMAX}.)
 \item \textbf{Memory width (Fourier features $M$)} ($0/8/24/48$): the \emph{linear} associator
-  ($M=0$) is optimal ($306$); the nonlinear expansion only adds variance ($253$--$304$). The
+  ($M=0$) is optimal ($383$); the nonlinear expansion only adds variance ($312$--$370$). The
   relevant dynamics here are smooth, and a linear content-addressable memory captures them.
-\item \textbf{Learning rate $\eta$} ($0.1/0.3/0.5/1.0$): slow learning is best
-  ($\eta=0.1 \to 319$); \emph{every} $\eta$ beats first-order ($280$).
+\item \textbf{Learning rate $\eta$} ($0.1/0.3/0.5/1.0$): the model is insensitive to $\eta$
+  ($383$--$388$); \emph{every} $\eta$ beats first-order ($327$).
 \item \textbf{Weight decay $\lambda$} ($0/10^{-4}/10^{-3}/10^{-2}$): moderate decay is best
-  ($10^{-3} \to 306$); every $\lambda$ beats first-order.
-\item \textbf{Action discretization} ($4/8/16$ headings, model-free): linear-Q ($\sim\!22$),
-  DQN ($\sim\!37$--$46$), and PPO ($\sim\!23$--$30$) stay far below the reflex ($\sim\!179$)
-  at every discretization, so the model-free failure is \emph{not} a discretization artifact
-  --- it persists at 16 actions.
+  ($10^{-3} \to 383$); every $\lambda$ beats first-order.
+\item \textbf{Action discretization} ($4/8/16$ headings, model-free): linear-Q ($20$--$24$),
+  DQN ($20$), and PPO ($18$--$24$) stay far below the reflex ($176$) at every discretization,
+  so the model-free failure is \emph{not} a discretization artifact --- it persists at 16
+  actions.
 \end{itemize}
+
+\subsection{Robustness: significance, noise, and closed-loop imagination}\label{sec:robustness}
+
+\textbf{Significance.} Table~\ref{tab:sig} reports two-sided Welch tests on the key
+comparisons. The world model's advantage over both analytic extrapolators on \texttt{circling}
+is significant ($p < 0.003$); the circle-fit specialist's edge over the world model on
+\texttt{circling} is significant but small ($p = 0.026$); the model-free learners' collapse
+below the reflex is highly significant ($p < 10^{-4}$); and the closed-loop variant's
+\emph{worsening} on \texttt{flee} is significant ($p = 0.003$).
+
+\begin{table}[t]
+\centering
+\caption{Welch $t$-tests (two-sided, 10 seeds per cell).}
+\label{tab:sig}
+\small
+\begin{tabular}{llrr}
+\toprule
+comparison & prey & $t$ & $p$ \\
+\midrule
+BDH vs velocity-lead & circling & 3.46 & 0.0028 \\
+BDH vs accel-lead & circling & 4.08 & 0.0024 \\
+circle-fit vs BDH & circling & 2.53 & 0.026 \\
+BDH-cl vs BDH & flee & $-3.81$ & 0.0030 \\
+SAC vs reflex & circling & $-6.79$ & $5.9\times 10^{-5}$ \\
+DQN vs reflex & circling & $-7.30$ & $4.3\times 10^{-5}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Noise sweep.} To locate the boundary of ``predictable enough,'' we add
+Ornstein--Uhlenbeck noise of increasing scale to the \texttt{circling} turn rate
+(\texttt{circling-noisy}) and compare the world model with first-order extrapolation
+(Table~\ref{tab:noise}). The world model's advantage is large and robust across noise scales
+$0$--$0.6$ ($+50$ to $+69$ catches) and collapses only at the extreme scale $1.2$ ($+1$), where
+the injected noise dominates the underlying circle. This sharpens limitation 1 of
+Section~\ref{sec:limitations}: the world model wins exactly where the signal (the circle) is
+recoverable from the noise.
+
+\begin{table}[t]
+\centering
+\caption{Noise sweep on \texttt{circling-noisy} (10 seeds $\times$ 24{,}000).}
+\label{tab:noise}
+\small
+\begin{tabular}{lrrr}
+\toprule
+\texttt{PREY\_NOISE} & velocity-lead & bdh & bdh $-$ vel \\
+\midrule
+0.0  & $323 \pm 34$ & $373 \pm 47$ & $+50$ \\
+0.15 & $320 \pm 38$ & $379 \pm 39$ & $+59$ \\
+0.3  & $323 \pm 35$ & $391 \pm 36$ & $+69$ \\
+0.6  & $321 \pm 36$ & $376 \pm 31$ & $+56$ \\
+1.2  & $328 \pm 21$ & $328 \pm 19$ & $+1$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Closed-loop imagination.} The open-loop world model holds the chaser fixed while
+rolling the prey forward, a crude model of reactive (\texttt{flee}) prey that respond to the
+chaser. We therefore also evaluate a closed-loop variant (\texttt{bdh-cl}) that, during the
+rollout, imagines the chaser steering toward the predicted prey position and moves it
+accordingly. Counter to the hope that this would close the gap on \texttt{flee}, it is
+\emph{significantly worse} ($147 \pm 14$ vs.\ $165 \pm 5$, $p = 0.003$) and no better elsewhere
+(Table~\ref{tab:results}). This is a negative result: as implemented, closed-loop imagination
+does not transfer to reactive prey, and we leave modeling the pursuit--evasion interaction as
+future work (Section~\ref{sec:future}).
 
 \section{Discussion}\label{sec:discussion}
 
@@ -402,9 +508,9 @@ prediction problem, not a credit-assignment problem. A value function must propa
 through many time steps of a high-frequency control loop to \emph{implicitly} represent the same
 thing a world model \emph{explicitly} predicts in one step.
 
-The dense reward and strong function approximators (DQN, PPO) do not rescue this: they reliably
-learn to \emph{approach} the prey but not to \emph{intercept} it, and frequently do worse than
-the reflex.
+The dense reward and strong function approximators (DQN, PPO, SAC) do not rescue this: they
+reliably learn to \emph{approach} the prey but not to \emph{intercept} it, and frequently do
+worse than the reflex.
 
 \subsection{Why the world model works}
 
@@ -417,46 +523,61 @@ that a \emph{linear} associative memory suffices here suggests that, for smooth 
 dynamics, content-addressable recall of local transitions is already a strong world model ---
 and that the ``fast weights'' of the BDH architecture are best read as a predictive substrate.
 
-\subsection{Limitations}
+\subsection{Limitations}\label{sec:limitations}
 
 This is a controlled toy domain and a first step, not a claim of generality. Specifically:
 \begin{enumerate}
 \item The result is strongest where it should be --- curved, predictable motion --- and does
   not hold on genuinely unpredictable (Martingale) prey, where no predictor beats first-order.
+  The noise sweep (Section~\ref{sec:robustness}) makes this boundary explicit: the advantage
+  vanishes only where the motion becomes unpredictable.
 \item On \textbf{reactive} prey (\texttt{flee}), the world model is only comparable to
-  first-order; our imagination holds the chaser fixed while rolling the prey forward, which is
-  a crude approximation of the closed-loop pursuit--evasion dynamics.
+  first-order. A closed-loop imagination variant that also simulates the chaser's pursuit
+  during the rollout does \emph{not} help --- it is significantly worse ($147 \pm 14$ vs.\
+  $165 \pm 5$, $p = 0.003$), so reactive evasion remains an open gap rather than a solved one.
 \item The world model is \textbf{linear}; the nonlinear (Fourier) expansion did not help on
   these smooth dynamics, so we do not demonstrate nonlinear world modeling.
+\item On the smooth-turning prey, the hand-crafted circle-fit specialist beats the world model;
+  the world model is a generalist that approaches but does not exceed the analytic ceiling on
+  the prey that analytic model is designed for.
 \item The environment is single-prey, toroidal, and two-dimensional; real pursuit adds walls,
-  multiple prey, partial observation, and sensing noise.
-\item Baselines SAC (continuous control) and a circle-fit analytic predictor remain for future
-  work, as do comparisons on a standard RL benchmark rather than a purpose-built task.
+  multiple prey, partial observation, and sensing noise, and the model-free baselines (DQN,
+  PPO, SAC) are not hyperparameter-tuned, so their failure is a lower bound on what tuned
+  methods could achieve.
 \end{enumerate}
 
-\subsection{What would make this a full paper}
+\subsection{Future work}\label{sec:future}
 
-To elevate this from a technical report to a full paper we would: (i) fix the closed-loop
-imagination so reactive prey are handled; (ii) add SAC and a circle-fit (or Kalman-with-turn)
-analytic baseline to close the baseline set; (iii) sweep stochasticity and noise to establish
-the boundary of ``predictable enough''; and (iv) reproduce the core value-vs-world-model
-contrast on a standard interception benchmark with multiple seeds and significance tests. The
-conceptual claim --- fast weights predict, not evaluate --- does not depend on these, but its
-generality does.
+With ten seeds, significance tests, a continuous-action baseline, an analytic circle-fit
+specialist, a noise sweep, and a closed-loop ablation in place, the remaining gaps are about
+\emph{generality}, not about the core contrast. Specifically: (i) \textbf{reactive prey} ---
+neither open-loop nor closed-loop imagination beats first-order on \texttt{flee}; modeling the
+pursuer--evader interaction remains open. (ii) \textbf{standard benchmarks} --- reproducing the
+value-vs-world-model contrast on a standard interception or control suite, rather than this
+purpose-built task, would test its generality. (iii) \textbf{nonlinear world modeling} --- the
+linear associator sufficed for these smooth dynamics; domains with genuinely nonlinear
+transitions are where a richer readout (Fourier features, or a deep successor) should be
+required. (iv) \textbf{tuned model-free baselines} --- DQN, PPO, and SAC were not exhaustively
+hyperparameter-tuned, so their collapse here is a documented failure of the \emph{interception}
+objective under default settings, not a claim that no RL method can ever intercept.
 
 \section{Conclusion}\label{sec:conclusion}
 
 We asked whether the fast-weight associative memory at the heart of the Dragon Hatchling
-architecture is a value function or a world model. In a seeded interception benchmark, the
-answer is decisive: the \emph{same} memory, used to predict, reaches $\sim\!94\%$ of the
-lead-pursuit ceiling and beats first- and second-order analytic extrapolation on curved prey,
-while used to evaluate it collapses below a no-prediction reflex --- and even strong model-free
-learners (DQN, PPO) cannot match the reflex. The result supports a clean reading of fast-weight
-memories as predictive substrates trained by dense self-supervised error, with sparse
-outcome-driven planning on top --- a Dreamer-style division of labor instantiated by a
-biologically plausible three-factor Hebbian rule. We hope this reframing is useful both to
-readers of the BDH literature and to practitioners choosing what to put in a fast-weight
-memory: put the \emph{next state}, not the \emph{value}.
+architecture is a value function or a world model. In a seeded interception benchmark with ten
+seeds and significance tests, the answer is decisive: the \emph{same} memory, used to predict,
+reaches $87$--$99\%$ of the best analytic predictor per environment and beats first- and
+second-order analytic extrapolation on curved prey, while used to evaluate it collapses to
+$0$--$24$ catches --- and even strong model-free learners (DQN, PPO, SAC) fall below a
+no-prediction reflex in every environment. The result is robust across a noise sweep and a
+closed-loop ablation, and is bounded honestly: on unpredictable motion no predictor beats
+first-order, and on smooth curved motion a hand-crafted circle-fitter remains the specialist
+ceiling that the general-purpose world model approaches from below. The result supports a clean
+reading of fast-weight memories as predictive substrates trained by dense self-supervised
+error, with sparse outcome-driven planning on top --- a Dreamer-style division of labor
+instantiated by a biologically plausible three-factor Hebbian rule. We hope this reframing is
+useful both to readers of the BDH literature and to practitioners choosing what to put in a
+fast-weight memory: put the \emph{next state}, not the \emph{value}.
 
 \section*{Acknowledgments and disclosures}
 
@@ -472,7 +593,9 @@ with arXiv's policy on authors' use of generative AI language tools
 
 \textbf{Code and data availability.} The benchmark, all experiment configurations, and the code
 to reproduce every number in this paper are available at
-\url{https://github.com/llvm-x86/fast-weights-predict}.
+\url{https://github.com/llvm-x86/fast-weights-predict}. \texttt{bench.py} is the
+numpy-accelerated implementation used to produce all numbers in this paper; \texttt{bench.js}
+is the reference JavaScript implementation.
 
 \begin{thebibliography}{11}
 
@@ -504,11 +627,11 @@ R.~S. Sutton.
 \newblock Learning to predict by the methods of temporal differences.
 \newblock \emph{Machine Learning}, 3(1):9--44, 1988.
 
-\bibitem{fremaux2016}
+\bibitem{fremaux2015}
 N.~Fr\'emaux and W.~Gerstner.
 \newblock Neuromodulated spike-timing-dependent plasticity, and theory of three-factor learning
   rules.
-\newblock \emph{Frontiers in Neural Circuits}, 9:85, 2016.
+\newblock \emph{Frontiers in Neural Circuits}, 9:85, 2015.
 
 \bibitem{hafner2023}
 D.~Hafner, J.~Pasukonis, J.~Ba, and T.~Lillicrap.
@@ -535,6 +658,13 @@ B.~R. Fajen and W.~H. Warren.
 \newblock Behavioral dynamics of steering, obstacle avoidance, and route selection.
 \newblock \emph{Journal of Experimental Psychology: Human Perception and Performance},
   29(2):343--362, 2003.
+
+\bibitem{haarnoja2018}
+T.~Haarnoja, A.~Zhou, P.~Abbeel, and S.~Levine.
+\newblock Soft actor-critic: Off-policy maximum entropy deep reinforcement learning with a
+  stochastic actor.
+\newblock In \emph{Proceedings of the 35th International Conference on Machine Learning
+  (ICML)}, 2018.
 
 \end{thebibliography}
 

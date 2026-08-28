@@ -87,6 +87,15 @@ Protocol: reset-on-catch. Metric: catches per episode (mean ± sd over seeds).
 | BDH-NG vs RLS | flee | 17.105 | 1.781e-08 |
 | BDH-NG vs BDH | circling | 0.478 | 0.6382 |
 | BDH-NG vs BDH | flee | -15.155 | 1.221e-11 |
+| BDH-pre vs RLS | circling | -0.608 | 0.5517 |
+| BDH-pre vs RLS | ou-turn | -3.027 | 0.007369 |
+| BDH-pre vs RLS | ou-vel | -2.660 | 0.01659 |
+| BDH-pre vs RLS | jump | -14.033 | 2.724e-10 |
+| BDH-pre vs RLS | const-vel | 0.000 | 1 |
+| BDH-pre vs RLS | flee | 18.506 | 8.79e-10 |
+| BDH-pre vs BDH | circling | 1.366 | 0.1895 |
+| BDH-pre vs BDH | ou-turn | 3.130 | 0.00578 |
+| BDH-pre vs BDH | flee | -2.712 | 0.01628 |
 | BDH vs RLS | zigflee | 23.686 | 6.373e-13 |
 | BDH vs RLS | adversarial | 33.218 | 2.455e-12 |
 | BDH-NG vs RLS | adversarial | 30.278 | 2.102e-12 |

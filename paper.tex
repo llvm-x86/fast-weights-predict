@@ -267,7 +267,8 @@ representational capacity.
 \subsection{Setup}
 
 All results are seeded and reproducible; every cell is a mean over 10 seeds with standard
-deviation. Hyperparameters were not tuned per-environment except where an ablation explicitly
+deviation. In each result table, the best performer per row is shown in bold and the
+second-best in italics. Hyperparameters were not tuned per-environment except where an ablation explicitly
 varies them. The BDH world model uses the linear feature set (Section~\ref{sec:method}),
 learning rate $\eta = 0.5$, and weight decay $\lambda = 10^{-3}$.
 
@@ -297,8 +298,8 @@ learning rate $\eta = 0.5$, and weight decay $\lambda = 10^{-3}$.
     reading).
   \item \texttt{dqn}: an MLP Q-network with replay buffer and target network.
   \item \texttt{ppo}: clipped-surrogate PPO with policy and value MLPs.
-  \item \texttt{sac}: Soft Actor-Critic with a continuous turn-rate action (reparameterized
-    actor, twin critics, fixed entropy coefficient $\alpha = 0.1$).
+  \item \texttt{sac}: Soft Actor-Critic \cite{haarnoja2018} with a continuous turn-rate action
+    (reparameterized actor, twin critics, fixed entropy coefficient $\alpha = 0.1$).
   \end{itemize}
 \end{itemize}
 
@@ -341,14 +342,14 @@ lead-pursuit predictors ($\times$ 24{,}000 steps). \emph{Bottom:} policies ($\ti
 \small
 \begin{tabular}{lcccccc}
 \toprule
-prey & velocity-lead & accel-lead & kalman-lead & circle-fit & \textbf{bdh} & bdh-cl \\
+prey & velocity-lead & accel-lead & kalman-lead & circle-fit & bdh & bdh-cl \\
 \midrule
-const-vel & $398 \pm 51$ & $398 \pm 51$ & $148 \pm 52$ & $284 \pm 46$ & $\mathbf{397 \pm 49}$ & $396 \pm 48$ \\
-circling  & $327 \pm 35$ & $130 \pm 192$ & $35 \pm 66$ & $415 \pm 15$ & $\mathbf{385 \pm 41}$ & $386 \pm 38$ \\
-ou-turn   & $368 \pm 17$ & $364 \pm 10$ & $116 \pm 7$ & $373 \pm 11$ & $\mathbf{331 \pm 15}$ & $327 \pm 17$ \\
-ou-vel    & $398 \pm 14$ & $389 \pm 10$ & $140 \pm 9$ & $398 \pm 15$ & $\mathbf{372 \pm 13}$ & $362 \pm 17$ \\
-jump      & $342 \pm 10$ & $293 \pm 8$ & $133 \pm 10$ & $282 \pm 6$ & $\mathbf{296 \pm 13}$ & $275 \pm 16$ \\
-flee      & $195 \pm 3$ & $71 \pm 10$ & $9 \pm 5$ & $178 \pm 2$ & $\mathbf{178 \pm 3}$ & $160 \pm 7$ \\
+const-vel & $\mathbf{398 \pm 51}$ & $\mathbf{398 \pm 51}$ & $148 \pm 52$ & $284 \pm 46$ & \emph{$397 \pm 49$} & $396 \pm 48$ \\
+circling  & $327 \pm 35$ & $130 \pm 192$ & $35 \pm 66$ & $\mathbf{415 \pm 15}$ & $385 \pm 41$ & \emph{$386 \pm 38$} \\
+ou-turn   & \emph{$368 \pm 17$} & $364 \pm 10$ & $116 \pm 7$ & $\mathbf{373 \pm 11}$ & $331 \pm 15$ & $327 \pm 17$ \\
+ou-vel    & $\mathbf{398 \pm 14}$ & \emph{$389 \pm 10$} & $140 \pm 9$ & $\mathbf{398 \pm 15}$ & $372 \pm 13$ & $362 \pm 17$ \\
+jump      & $\mathbf{342 \pm 10}$ & $293 \pm 8$ & $133 \pm 10$ & $282 \pm 6$ & \emph{$296 \pm 13$} & $275 \pm 16$ \\
+flee      & $\mathbf{195 \pm 3}$ & $71 \pm 10$ & $9 \pm 5$ & \emph{$178 \pm 2$} & \emph{$178 \pm 3$} & $160 \pm 7$ \\
 \bottomrule
 \end{tabular}
 
@@ -358,12 +359,12 @@ flee      & $195 \pm 3$ & $71 \pm 10$ & $9 \pm 5$ & $178 \pm 2$ & $\mathbf{178 \
 \toprule
 prey & pure-pursuit & mpc & linear-q & dqn & ppo & sac \\
 \midrule
-const-vel & $80 \pm 6$ & $304 \pm 37$ & $18 \pm 8$ & $19 \pm 15$ & $30 \pm 10$ & $23 \pm 13$ \\
-circling  & $176 \pm 67$ & $256 \pm 31$ & $18 \pm 3$ & $23 \pm 8$ & $22 \pm 6$ & $27 \pm 13$ \\
-ou-turn   & $134 \pm 10$ & $269 \pm 21$ & $22 \pm 5$ & $19 \pm 5$ & $21 \pm 3$ & $25 \pm 9$ \\
-ou-vel    & $144 \pm 9$ & $308 \pm 14$ & $18 \pm 5$ & $21 \pm 6$ & $25 \pm 7$ & $28 \pm 5$ \\
-jump      & $252 \pm 10$ & $261 \pm 8$ & $20 \pm 5$ & $25 \pm 4$ & $24 \pm 5$ & $28 \pm 7$ \\
-flee      & $170 \pm 3$ & $152 \pm 2$ & $0 \pm 0$ & $3 \pm 3$ & $0 \pm 0$ & $7 \pm 5$ \\
+const-vel & \emph{$80 \pm 6$} & $\mathbf{304 \pm 37}$ & $18 \pm 8$ & $19 \pm 15$ & $30 \pm 10$ & $23 \pm 13$ \\
+circling  & \emph{$176 \pm 67$} & $\mathbf{256 \pm 31}$ & $18 \pm 3$ & $23 \pm 8$ & $22 \pm 6$ & $27 \pm 13$ \\
+ou-turn   & \emph{$134 \pm 10$} & $\mathbf{269 \pm 21}$ & $22 \pm 5$ & $19 \pm 5$ & $21 \pm 3$ & $25 \pm 9$ \\
+ou-vel    & \emph{$144 \pm 9$} & $\mathbf{308 \pm 14}$ & $18 \pm 5$ & $21 \pm 6$ & $25 \pm 7$ & $28 \pm 5$ \\
+jump      & \emph{$252 \pm 10$} & $\mathbf{261 \pm 8}$ & $20 \pm 5$ & $25 \pm 4$ & $24 \pm 5$ & $28 \pm 7$ \\
+flee      & $\mathbf{170 \pm 3}$ & \emph{$152 \pm 2$} & $0 \pm 0$ & $3 \pm 3$ & $0 \pm 0$ & $7 \pm 5$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -500,11 +501,11 @@ recoverable from the noise.
 \toprule
 \texttt{PREY\_NOISE} & velocity-lead & bdh & bdh $-$ vel \\
 \midrule
-0.0  & $323 \pm 34$ & $379 \pm 48$ & $+56$ \\
-0.15 & $320 \pm 38$ & $389 \pm 39$ & $+69$ \\
-0.3  & $323 \pm 35$ & $393 \pm 28$ & $+70$ \\
-0.6  & $321 \pm 36$ & $380 \pm 28$ & $+59$ \\
-1.2  & $328 \pm 21$ & $326 \pm 25$ & $-1$ \\
+0.0  & \emph{$323 \pm 34$} & $\mathbf{379 \pm 48}$ & $+56$ \\
+0.15 & \emph{$320 \pm 38$} & $\mathbf{389 \pm 39}$ & $+69$ \\
+0.3  & \emph{$323 \pm 35$} & $\mathbf{393 \pm 28}$ & $+70$ \\
+0.6  & \emph{$321 \pm 36$} & $\mathbf{380 \pm 28}$ & $+59$ \\
+1.2  & $\mathbf{328 \pm 21}$ & \emph{$326 \pm 25$} & $-1$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -579,12 +580,12 @@ Table~\ref{tab:formulation} reports catches. Three findings follow.
 \toprule
 prey & bdh (Dragon Hatchling) & sgd (LMS) & rls & mlp \\
 \midrule
-const-vel & $397 \pm 49$ & $398 \pm 51$ & $398 \pm 50$ & $297 \pm 128$ \\
-circling  & $385 \pm 41$ & $374 \pm 71$ & $\mathbf{416 \pm 24}$ & $174 \pm 19$ \\
-ou-turn   & $331 \pm 15$ & $336 \pm 8$  & $\mathbf{371 \pm 13}$ & $222 \pm 27$ \\
-ou-vel    & $372 \pm 13$ & $373 \pm 17$ & $\mathbf{399 \pm 13}$ & $258 \pm 33$ \\
-jump      & $296 \pm 13$ & $296 \pm 13$ & $\mathbf{349 \pm 9}$  & $254 \pm 13$ \\
-flee      & $\mathbf{178 \pm 3}$ & $162 \pm 4$ & $86 \pm 14$ & $161 \pm 8$ \\
+const-vel & \emph{$397 \pm 49$} & $\mathbf{398 \pm 51}$ & $\mathbf{398 \pm 50}$ & $297 \pm 128$ \\
+circling  & \emph{$385 \pm 41$} & $374 \pm 71$ & $\mathbf{416 \pm 24}$ & $174 \pm 19$ \\
+ou-turn   & $331 \pm 15$ & \emph{$336 \pm 8$}  & $\mathbf{371 \pm 13}$ & $222 \pm 27$ \\
+ou-vel    & $372 \pm 13$ & \emph{$373 \pm 17$} & $\mathbf{399 \pm 13}$ & $258 \pm 33$ \\
+jump      & \emph{$296 \pm 13$} & \emph{$296 \pm 13$} & $\mathbf{349 \pm 9}$  & $254 \pm 13$ \\
+flee      & $\mathbf{178 \pm 3}$ & \emph{$162 \pm 4$} & $86 \pm 14$ & $161 \pm 8$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -671,12 +672,12 @@ covariance, and that is the one thing locality forbids.
 \toprule
 prey & bdh & rls & bdh-pre (natural gradient) & bdh-avg (averaging) & bdh-ng (both) \\
 \midrule
-const-vel & $397 \pm 49$ & $\mathbf{398 \pm 50}$ & $398 \pm 51$ & $398 \pm 51$ & $397 \pm 51$ \\
-circling  & $385 \pm 41$ & $\mathbf{416 \pm 24}$ & $408 \pm 34$ & $363 \pm 88$ & $394 \pm 47$ \\
-ou-turn   & $331 \pm 15$ & $\mathbf{371 \pm 13}$ & $352 \pm 15$ & $310 \pm 13$ & $307 \pm 13$ \\
-ou-vel    & $372 \pm 13$ & $\mathbf{399 \pm 13}$ & $381 \pm 17$ & $341 \pm 11$ & $348 \pm 9$ \\
-jump      & $296 \pm 13$ & $\mathbf{349 \pm 9}$  & $301 \pm 6$  & $312 \pm 18$ & $294 \pm 10$ \\
-flee      & $\mathbf{178 \pm 3}$ & $86 \pm 14$ & $173 \pm 5$ & $138 \pm 5$ & $162 \pm 2$ \\
+const-vel & \emph{$397 \pm 49$} & $\mathbf{398 \pm 50}$ & $\mathbf{398 \pm 51}$ & $\mathbf{398 \pm 51}$ & \emph{$397 \pm 51$} \\
+circling  & $385 \pm 41$ & $\mathbf{416 \pm 24}$ & \emph{$408 \pm 34$} & $363 \pm 88$ & $394 \pm 47$ \\
+ou-turn   & $331 \pm 15$ & $\mathbf{371 \pm 13}$ & \emph{$352 \pm 15$} & $310 \pm 13$ & $307 \pm 13$ \\
+ou-vel    & $372 \pm 13$ & $\mathbf{399 \pm 13}$ & \emph{$381 \pm 17$} & $341 \pm 11$ & $348 \pm 9$ \\
+jump      & $296 \pm 13$ & $\mathbf{349 \pm 9}$  & $301 \pm 6$  & \emph{$312 \pm 18$} & $294 \pm 10$ \\
+flee      & $\mathbf{178 \pm 3}$ & $86 \pm 14$ & \emph{$173 \pm 5$} & $138 \pm 5$ & $162 \pm 2$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -743,9 +744,9 @@ $\times$ 24{,}000).}
 \toprule
 prey & velocity-lead & circle-fit & bdh & bdh-cl & rls & bdh-ng \\
 \midrule
-flee       & $195 \pm 3$ & $178 \pm 2$ & $178 \pm 3$ & $160 \pm 7$ & $86 \pm 14$ & $162 \pm 2$ \\
-zigflee    & $227 \pm 5$ & $216 \pm 4$ & $208 \pm 5$ & $206 \pm 4$ & $138 \pm 8$ & $187 \pm 5$ \\
-adversarial& $161 \pm 2$ & $144 \pm 1$ & $146 \pm 3$ & $129 \pm 9$ & $51 \pm 9$  & $139 \pm 3$ \\
+flee       & $\mathbf{195 \pm 3}$ & \emph{$178 \pm 2$} & \emph{$178 \pm 3$} & $160 \pm 7$ & $86 \pm 14$ & $162 \pm 2$ \\
+zigflee    & $\mathbf{227 \pm 5}$ & \emph{$216 \pm 4$} & $208 \pm 5$ & $206 \pm 4$ & $138 \pm 8$ & $187 \pm 5$ \\
+adversarial& $\mathbf{161 \pm 2}$ & $144 \pm 1$ & \emph{$146 \pm 3$} & $129 \pm 9$ & $51 \pm 9$  & $139 \pm 3$ \\
 \bottomrule
 \end{tabular}
 \end{table}

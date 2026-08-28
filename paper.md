@@ -225,7 +225,7 @@ across predictors is *how the forecast is made*.
 
 To make the value-vs-world-model contrast clean, we implement the evaluative reading with the
 *identical* substrate: $Q(s,a) = w_a \cdot \phi(s)$ for $8$ discrete headings, trained by
-TD(0) with $\epsilon$-greedy exploration (Section 5). This is exactly a linear value function
+TD(0) [Sutton 1988] with $\epsilon$-greedy exploration (Section 5). This is exactly a linear value function
 over the same features $\phi$, updated by a bootstrapped, off-policy rule — the textbook
 "deadly triad" configuration [Sutton & Barto 2018]. Any performance gap between it and the
 world model is therefore attributable to the *role* of the memory (evaluate vs. predict), not
@@ -236,7 +236,8 @@ to the substrate, features, or representational capacity.
 ### 5.1 Setup
 
 All results are seeded and reproducible; every cell is a mean over 10 seeds with standard
-deviation. Hyperparameters were not tuned per-environment except where an ablation explicitly
+deviation. In each result table, the best performer per row is bolded and the second-best is
+italicized. Hyperparameters were not tuned per-environment except where an ablation explicitly
 varies them. The BDH world model uses the linear feature set (Section 4.1), learning rate
 $\eta = 0.5$, and weight decay $\lambda = 10^{-3}$.
 
@@ -261,8 +262,8 @@ $\eta = 0.5$, and weight decay $\lambda = 10^{-3}$.
   - `linear-q`: linear TD Q-learning over the same features $\phi$ (the evaluative reading).
   - `dqn`: an MLP Q-network with replay buffer and target network.
   - `ppo`: clipped-surrogate PPO with policy and value MLPs.
-  - `sac`: Soft Actor-Critic with a continuous turn-rate action (reparameterized actor, twin
-    critics, fixed entropy coefficient $\alpha = 0.1$).
+  - `sac`: Soft Actor-Critic [Haarnoja et al. 2018] with a continuous turn-rate action
+    (reparameterized actor, twin critics, fixed entropy coefficient $\alpha = 0.1$).
 
 The model-free learners receive a dense reward $r = -\text{distance}/600$ plus a $+1$ catch
 bonus, so their failure is a credit-assignment/interception failure rather than an artifact of
@@ -293,23 +294,23 @@ and fails when it *evaluates*.
 **Table 1.** Catches per episode (mean $\pm$ sd), reset-on-catch, 10 seeds. *Top:*
 lead-pursuit predictors (× 24,000 steps). *Bottom:* policies (× 20,000 steps).
 
-| prey | velocity-lead | accel-lead | kalman-lead | circle-fit | **bdh** | bdh-cl |
+| prey | velocity-lead | accel-lead | kalman-lead | circle-fit | bdh | bdh-cl |
 |---|---|---|---|---|---|---|
-| const-vel | 398 ± 51 | 398 ± 51 | 148 ± 52 | 284 ± 46 | **397 ± 49** | 396 ± 48 |
-| circling | 327 ± 35 | 130 ± 192 | 35 ± 66 | 415 ± 15 | **385 ± 41** | 386 ± 38 |
-| ou-turn | 368 ± 17 | 364 ± 10 | 116 ± 7 | 373 ± 11 | **331 ± 15** | 327 ± 17 |
-| ou-vel | 398 ± 14 | 389 ± 10 | 140 ± 9 | 398 ± 15 | **372 ± 13** | 362 ± 17 |
-| jump | 342 ± 10 | 293 ± 8 | 133 ± 10 | 282 ± 6 | **296 ± 13** | 275 ± 16 |
-| flee | 195 ± 3 | 71 ± 10 | 9 ± 5 | 178 ± 2 | **178 ± 3** | 160 ± 7 |
+| const-vel | **398 ± 51** | **398 ± 51** | 148 ± 52 | 284 ± 46 | *397 ± 49* | 396 ± 48 |
+| circling | 327 ± 35 | 130 ± 192 | 35 ± 66 | **415 ± 15** | 385 ± 41 | *386 ± 38* |
+| ou-turn | *368 ± 17* | 364 ± 10 | 116 ± 7 | **373 ± 11** | 331 ± 15 | 327 ± 17 |
+| ou-vel | **398 ± 14** | *389 ± 10* | 140 ± 9 | **398 ± 15** | 372 ± 13 | 362 ± 17 |
+| jump | **342 ± 10** | 293 ± 8 | 133 ± 10 | 282 ± 6 | *296 ± 13* | 275 ± 16 |
+| flee | **195 ± 3** | 71 ± 10 | 9 ± 5 | *178 ± 2* | *178 ± 3* | 160 ± 7 |
 
 | prey | pure-pursuit | mpc | linear-q | dqn | ppo | sac |
 |---|---|---|---|---|---|---|
-| const-vel | 80 ± 6 | 304 ± 37 | 18 ± 8 | 19 ± 15 | 30 ± 10 | 23 ± 13 |
-| circling | 176 ± 67 | 256 ± 31 | 18 ± 3 | 23 ± 8 | 22 ± 6 | 27 ± 13 |
-| ou-turn | 134 ± 10 | 269 ± 21 | 22 ± 5 | 19 ± 5 | 21 ± 3 | 25 ± 9 |
-| ou-vel | 144 ± 9 | 308 ± 14 | 18 ± 5 | 21 ± 6 | 25 ± 7 | 28 ± 5 |
-| jump | 252 ± 10 | 261 ± 8 | 20 ± 5 | 25 ± 4 | 24 ± 5 | 28 ± 7 |
-| flee | 170 ± 3 | 152 ± 2 | 0 ± 0 | 3 ± 3 | 0 ± 0 | 7 ± 5 |
+| const-vel | *80 ± 6* | **304 ± 37** | 18 ± 8 | 19 ± 15 | 30 ± 10 | 23 ± 13 |
+| circling | *176 ± 67* | **256 ± 31** | 18 ± 3 | 23 ± 8 | 22 ± 6 | 27 ± 13 |
+| ou-turn | *134 ± 10* | **269 ± 21** | 22 ± 5 | 19 ± 5 | 21 ± 3 | 25 ± 9 |
+| ou-vel | *144 ± 9* | **308 ± 14** | 18 ± 5 | 21 ± 6 | 25 ± 7 | 28 ± 5 |
+| jump | *252 ± 10* | **261 ± 8** | 20 ± 5 | 25 ± 4 | 24 ± 5 | 28 ± 7 |
+| flee | **170 ± 3** | *152 ± 2* | 0 ± 0 | 3 ± 3 | 0 ± 0 | 7 ± 5 |
 
 The world model's advantage is specific and predictable: it *ties* first-order on linear
 motion (`const-vel`, as it should for a linear model), *beats* first-order decisively on
@@ -421,11 +422,11 @@ recoverable from the noise.
 
 | PREY_NOISE | velocity-lead | bdh | bdh − vel |
 |---|---|---|---|
-| 0.0 | 323 ± 34 | 379 ± 48 | +56 |
-| 0.15 | 320 ± 38 | 389 ± 39 | +69 |
-| 0.3 | 323 ± 35 | 393 ± 28 | +70 |
-| 0.6 | 321 ± 36 | 380 ± 28 | +59 |
-| 1.2 | 328 ± 21 | 326 ± 25 | −1 |
+| 0.0 | *323 ± 34* | **379 ± 48** | +56 |
+| 0.15 | *320 ± 38* | **389 ± 39** | +69 |
+| 0.3 | *323 ± 35* | **393 ± 28** | +70 |
+| 0.6 | *321 ± 36* | **380 ± 28** | +59 |
+| 1.2 | **328 ± 21** | *326 ± 25* | −1 |
 
 **Closed-loop imagination.** The open-loop world model holds the chaser fixed while rolling
 the prey forward, a crude model of reactive (`flee`) prey that respond to the chaser. We
@@ -484,12 +485,12 @@ $\tau$-step rollout, and the lead-pursuit planner fixed:
 
 | prey | bdh (Dragon Hatchling) | sgd (LMS) | rls | mlp |
 |---|---|---|---|---|
-| const-vel | 397 ± 49 | 398 ± 51 | 398 ± 50 | 297 ± 128 |
-| circling | 385 ± 41 | 374 ± 71 | **416 ± 24** | 174 ± 19 |
-| ou-turn | 331 ± 15 | 336 ± 8 | **371 ± 13** | 222 ± 27 |
-| ou-vel | 372 ± 13 | 373 ± 17 | **399 ± 13** | 258 ± 33 |
-| jump | 296 ± 13 | 296 ± 13 | **349 ± 9** | 254 ± 13 |
-| flee | **178 ± 3** | 162 ± 4 | 86 ± 14 | 161 ± 8 |
+| const-vel | *397 ± 49* | **398 ± 51** | **398 ± 50** | 297 ± 128 |
+| circling | *385 ± 41* | 374 ± 71 | **416 ± 24** | 174 ± 19 |
+| ou-turn | 331 ± 15 | *336 ± 8* | **371 ± 13** | 222 ± 27 |
+| ou-vel | 372 ± 13 | *373 ± 17* | **399 ± 13** | 258 ± 33 |
+| jump | *296 ± 13* | *296 ± 13* | **349 ± 9** | 254 ± 13 |
+| flee | **178 ± 3** | *162 ± 4* | 86 ± 14 | 161 ± 8 |
 
 **Interpretation.** "Dragon Hatchling" is best read as the *plausible* world-model formulation:
 it is the only one realizable by local, outer-product, three-factor synaptic plasticity — no
@@ -563,12 +564,12 @@ thing locality forbids.
 
 | prey | bdh | rls | bdh-pre (natural gradient) | bdh-avg (averaging) | bdh-ng (both) |
 |---|---|---|---|---|---|
-| const-vel | 397 ± 49 | **398 ± 50** | 398 ± 51 | 398 ± 51 | 397 ± 51 |
-| circling | 385 ± 41 | **416 ± 24** | 408 ± 34 | 363 ± 88 | 394 ± 47 |
-| ou-turn | 331 ± 15 | **371 ± 13** | 352 ± 15 | 310 ± 13 | 307 ± 13 |
-| ou-vel | 372 ± 13 | **399 ± 13** | 381 ± 17 | 341 ± 11 | 348 ± 9 |
-| jump | 296 ± 13 | **349 ± 9** | 301 ± 6 | 312 ± 18 | 294 ± 10 |
-| flee | **178 ± 3** | 86 ± 14 | 173 ± 5 | 138 ± 5 | 162 ± 2 |
+| const-vel | *397 ± 49* | **398 ± 50** | **398 ± 51** | **398 ± 51** | *397 ± 51* |
+| circling | 385 ± 41 | **416 ± 24** | *408 ± 34* | 363 ± 88 | 394 ± 47 |
+| ou-turn | 331 ± 15 | **371 ± 13** | *352 ± 15* | 310 ± 13 | 307 ± 13 |
+| ou-vel | 372 ± 13 | **399 ± 13** | *381 ± 17* | 341 ± 11 | 348 ± 9 |
+| jump | 296 ± 13 | **349 ± 9** | 301 ± 6 | *312 ± 18* | 294 ± 10 |
+| flee | **178 ± 3** | 86 ± 14 | *173 ± 5* | 138 ± 5 | 162 ± 2 |
 
 ### 5.8 Result 5: the adaptive edge — Hebbian memory wins on nonstationary and adversarial prey
 
@@ -619,9 +620,9 @@ optimality requires.
 
 | prey | velocity-lead | circle-fit | bdh | bdh-cl | rls | bdh-ng |
 |---|---|---|---|---|---|---|
-| flee | 195 ± 3 | 178 ± 2 | 178 ± 3 | 160 ± 7 | 86 ± 14 | 162 ± 2 |
-| zigflee | 227 ± 5 | 216 ± 4 | 208 ± 5 | 206 ± 4 | 138 ± 8 | 187 ± 5 |
-| adversarial | 161 ± 2 | 144 ± 1 | 146 ± 3 | 129 ± 9 | 51 ± 9 | 139 ± 3 |
+| flee | **195 ± 3** | *178 ± 2* | *178 ± 3* | 160 ± 7 | 86 ± 14 | 162 ± 2 |
+| zigflee | **227 ± 5** | *216 ± 4* | 208 ± 5 | 206 ± 4 | 138 ± 8 | 187 ± 5 |
+| adversarial | **161 ± 2** | 144 ± 1 | *146 ± 3* | 129 ± 9 | 51 ± 9 | 139 ± 3 |
 
 ## 6 Discussion
 

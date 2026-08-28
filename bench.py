@@ -33,7 +33,7 @@ CHASE_MAX = 175
 CHASER_MAXTURN = float(os.environ.get('TURN', 3.6))
 PREY_MAXTURN = 2.5
 PREY_VMAX = 160
-PREY_SPEED = float(os.environ.get('PREY_SPEED', 165))
+PREY_SPEED = float(os.environ.get('PREY_SPEED', 160))
 LEAD_TAU_CAP = 40
 PREY_NOISE = float(os.environ.get('PREY_NOISE', 0.3))
 
@@ -133,7 +133,7 @@ def make_prey(type_, rng):
         elif t == 'ou-turn':
             omega += (-1.0 * omega) * dt + 0.8 * math.sqrt(dt) * rng['gauss']()
             h = wrap_angle(h + omega * dt)
-            set_vel(h, 165)
+            set_vel(h, PREY_SPEED)
             move()
         elif t == 'circling':
             h = wrap_angle(h + omega * dt)
@@ -827,7 +827,7 @@ def main():
     out = []
     out.append('# Dragon-Hatchling pursuit benchmark — results (numpy)')
     out.append('')
-    out.append(f'Environment: toroidal {W}x{H}, dt={DT}s, catch radius {CATCH_RADIUS}px, chaser {CHASE_MAX} px/s, prey {min(PREY_SPEED, PREY_VMAX):.0f} px/s (PREY_VMAX cap).')
+    out.append(f'Environment: toroidal {W}x{H}, dt={DT}s, catch radius {CATCH_RADIUS}px, chaser {CHASE_MAX} px/s, prey {PREY_SPEED:.0f} px/s.')
     out.append('Protocol: reset-on-catch. Metric: catches per episode (mean ± sd over seeds).')
     out.append('')
 

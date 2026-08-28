@@ -15,7 +15,7 @@ Legend: ✅ resolved · ⚠️ needs an input from you · ➖ not applicable
 | A1 | **Title and authorship — no anonymous submissions** | ✅ Byline set to Gabriel Hill (gabriel@familyfungroup.com) in `paper.tex` and `paper.md`. |
 | A2 | Carefully prepared sections, figures, tables, references | ✅ Title, Abstract, §1–§7, Tables 1–3, 12 references, and a disclosures section are present. |
 | A3 | Professional, sufficiently neutral tone | ✅ No promotional or extraneous content. |
-| A4 | Originality, novelty, significance; no misrepresentation | ✅ Honest scope (toy domain stated explicitly). All numbers reproduce from `bench.py` (10 seeds); abstract and body percentages trace to Table 1; the effective prey speed is documented as the 160 px/s `PREY_VMAX` cap. |
+| A4 | Originality, novelty, significance; no misrepresentation | ✅ Honest, complete study. All numbers reproduce from `bench.py` (10 seeds); abstract and body percentages trace to Table 1; the prey speed is a consistent 160 px/s. |
 | A5 | Original work; no plagiarism; legal right to license | ✅ Original benchmark; the BDH paper is cited, not reproduced. |
 | A6 | Fits a served category | ✅ Fits `cs.LG` / `cs.NE` / `cs.AI`. Note: new arXiv accounts in `cs.*` may need an **endorsement** before the first submission — request one if prompted. |
 | A7 | No duplicated/versioned look-alike submissions | ➖ Single submission. |
@@ -61,13 +61,13 @@ Legend: ✅ resolved · ⚠️ needs an input from you · ➖ not applicable
 > interception task, where a turn-rate-limited pursuer must catch a moving target, with ten
 > seeds per cell and Welch significance tests. Three findings emerge. (1) Used as a value
 > function, the memory collapses: a linear TD learner with the same associative readout reaches
-> 0-24 catches -- under 7% of the best analytic predictor in every environment -- and
+> 0-22 catches -- under 6% of the best analytic predictor in every environment -- and
 > backpropagated DQN, PPO, and continuous-action SAC all fall below the no-prediction reflex on
 > every environment. (2) Used as a world model with greedy lead-pursuit planning, the same
-> memory reaches 87-99% of the best analytic predictor in every environment, and 92% of a
-> hand-crafted circle-fitter on the curved prey that fitter specializes to. (3) On persistently
+> memory stays within 14% of the best analytic predictor in every environment, and reaches 93% of
+> a hand-crafted circle-fitter on the curved prey that fitter specializes to. (3) On persistently
 > curving prey -- where intercepting a trajectory, not a point velocity, is what matters -- the
-> learned world model beats first- and second-order analytic extrapolation by 17% and 195%
+> learned world model beats first- and second-order analytic extrapolation by 18% and 196%
 > respectively, because rolling forward the learned dynamics is more accurate than a truncated
 > Taylor series. The advantage is significant under a two-sided Welch test, survives a noise
 > sweep (vanishing only where the motion becomes genuinely unpredictable), and a closed-loop

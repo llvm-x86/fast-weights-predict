@@ -1,48 +1,48 @@
 # Dragon-Hatchling pursuit benchmark — results (numpy)
 
-Environment: toroidal 1200x800, dt=0.05s, catch radius 48px, chaser 175 px/s, prey 160 px/s (PREY_VMAX cap).
+Environment: toroidal 1200x800, dt=0.05s, catch radius 48px, chaser 175 px/s, prey 160 px/s.
 Protocol: reset-on-catch. Metric: catches per episode (mean ± sd over seeds).
 
 ## Lead-pursuit predictors (mean ± sd, reset-on-catch, 10 seeds x 24000)
 
 | prey | velocity-lead | accel-lead | kalman-lead | circle-fit | bdh | bdh-cl |
 |---|---|---|---|---|---|---|
-| const-vel | 364 ± 57 | 363 ± 56 | 148 ± 50 | 232 ± 48 | 363 ± 53 | 358 ± 58 |
-| circling | 327 ± 35 | 130 ± 192 | 35 ± 66 | 415 ± 15 | 383 ± 38 | 383 ± 46 |
-| ou-turn | 368 ± 17 | 364 ± 10 | 116 ± 7 | 373 ± 11 | 327 ± 6 | 332 ± 11 |
-| ou-vel | 388 ± 8 | 385 ± 15 | 136 ± 16 | 388 ± 18 | 362 ± 12 | 362 ± 14 |
-| jump | 342 ± 10 | 293 ± 8 | 133 ± 10 | 282 ± 6 | 298 ± 11 | 274 ± 6 |
-| flee | 182 ± 2 | 68 ± 7 | 6 ± 3 | 162 ± 2 | 165 ± 5 | 147 ± 14 |
+| const-vel | 398 ± 51 | 398 ± 51 | 148 ± 52 | 284 ± 46 | 397 ± 49 | 396 ± 48 |
+| circling | 327 ± 35 | 130 ± 192 | 35 ± 66 | 415 ± 15 | 385 ± 41 | 386 ± 38 |
+| ou-turn | 368 ± 17 | 364 ± 10 | 116 ± 7 | 373 ± 11 | 331 ± 15 | 327 ± 17 |
+| ou-vel | 398 ± 14 | 389 ± 10 | 140 ± 9 | 398 ± 15 | 372 ± 13 | 362 ± 17 |
+| jump | 342 ± 10 | 293 ± 8 | 133 ± 10 | 282 ± 6 | 296 ± 13 | 275 ± 16 |
+| flee | 195 ± 3 | 71 ± 10 | 9 ± 5 | 178 ± 2 | 178 ± 3 | 160 ± 7 |
 
 ## Policies (mean ± sd, reset-on-catch, 10 seeds x 20000)
 
 | prey | pure-pursuit | mpc | linear-q | dqn | ppo | sac |
 |---|---|---|---|---|---|---|
-| const-vel | 57 ± 6 | 242 ± 34 | 21 ± 6 | 23 ± 13 | 29 ± 12 | 22 ± 20 |
-| circling | 176 ± 67 | 256 ± 31 | 20 ± 6 | 20 ± 5 | 18 ± 5 | 29 ± 12 |
-| ou-turn | 134 ± 10 | 269 ± 21 | 24 ± 5 | 18 ± 5 | 24 ± 5 | 24 ± 4 |
-| ou-vel | 134 ± 7 | 301 ± 11 | 21 ± 6 | 20 ± 6 | 23 ± 6 | 25 ± 6 |
-| jump | 252 ± 10 | 261 ± 8 | 20 ± 3 | 25 ± 4 | 22 ± 4 | 32 ± 10 |
-| flee | 159 ± 2 | 139 ± 3 | 0 ± 0 | 1 ± 2 | 0 ± 0 | 4 ± 4 |
+| const-vel | 80 ± 6 | 304 ± 37 | 18 ± 8 | 19 ± 15 | 30 ± 10 | 23 ± 13 |
+| circling | 176 ± 67 | 256 ± 31 | 18 ± 3 | 23 ± 8 | 22 ± 6 | 27 ± 13 |
+| ou-turn | 134 ± 10 | 269 ± 21 | 22 ± 5 | 19 ± 5 | 21 ± 3 | 25 ± 9 |
+| ou-vel | 144 ± 9 | 308 ± 14 | 18 ± 5 | 21 ± 6 | 25 ± 7 | 28 ± 5 |
+| jump | 252 ± 10 | 261 ± 8 | 20 ± 5 | 25 ± 4 | 24 ± 5 | 28 ± 7 |
+| flee | 170 ± 3 | 152 ± 2 | 0 ± 0 | 3 ± 3 | 0 ± 0 | 7 ± 5 |
 
 ## Significance (Welch t-test, two-sided)
 
 | comparison | prey | t | p |
 |---|---|---|---|
-| BDH vs velocity-lead | circling | 3.457 | 0.002828 |
-| BDH vs accel-lead | circling | 4.082 | 0.002359 |
-| BDH-cl vs BDH | flee | -3.814 | 0.002963 |
-| circle-fit vs BDH | circling | 2.533 | 0.0263 |
-| SAC vs reflex | circling | -6.791 | 5.906e-05 |
-| DQN vs reflex | circling | -7.300 | 4.275e-05 |
+| BDH vs velocity-lead | circling | 3.427 | 0.00309 |
+| BDH vs accel-lead | circling | 4.103 | 0.002226 |
+| BDH-cl vs BDH | flee | -8.069 | 4.596e-06 |
+| circle-fit vs BDH | circling | 2.207 | 0.04838 |
+| SAC vs reflex | circling | -6.895 | 5.055e-05 |
+| DQN vs reflex | circling | -7.169 | 4.617e-05 |
 
 ## Noise sweep (circling-noisy, BDH vs velocity-lead, 10 seeds x 24000)
 
 | PREY_NOISE | velocity-lead | bdh | bdh - vel |
 |---|---|---|---|
-| 0.0 | 323.0 ± 34 | 372.8 ± 47 | +49.8 |
-| 0.15 | 320.2 ± 38 | 379.2 ± 39 | +59.0 |
-| 0.3 | 322.8 ± 35 | 391.4 ± 36 | +68.6 |
-| 0.6 | 320.6 ± 36 | 376.2 ± 31 | +55.6 |
-| 1.2 | 327.5 ± 21 | 328.3 ± 19 | +0.8 |
+| 0.0 | 323.0 ± 34 | 378.9 ± 48 | +55.9 |
+| 0.15 | 320.2 ± 38 | 388.8 ± 39 | +68.6 |
+| 0.3 | 322.8 ± 35 | 392.6 ± 28 | +69.8 |
+| 0.6 | 320.6 ± 36 | 379.5 ± 28 | +58.9 |
+| 1.2 | 327.5 ± 21 | 326.0 ± 25 | -1.5 |
 

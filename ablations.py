@@ -33,13 +33,13 @@ for T in [1.8, 2.7, 3.6, 5.4]:
     print(f'TURN={T}: ' + line(d))
 B.CHASER_MAXTURN = 3.6
 
-# 2. speed ratio
+# 2. speed ratio (sub-cap speeds, so the PREY_VMAX=160 clamp is never active)
 print('=== 2. speed ratio (circling, bdh vs velocity-lead vs accel-lead) ===')
-for sp in [150, 165, 180]:
+for sp in [140, 150, 160]:
     B.PREY_SPEED = sp
     d = preds([('vel', 'velocity-lead'), ('accel', 'accel-lead'), ('bdh', 'bdh')])
     print(f'PREY_SPEED={sp}: ' + line(d))
-B.PREY_SPEED = 165
+B.PREY_SPEED = 160
 
 # 3. memory width (Fourier features M)
 print('=== 3. memory width M (circling, bdh) ===')

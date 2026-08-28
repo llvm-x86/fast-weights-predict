@@ -15,7 +15,7 @@ const CHASE_MAX = 175;              // chaser sprints at constant top speed
 const CHASER_MAXTURN = process.env.TURN != null ? parseFloat(process.env.TURN) : 3.6;   // rad/s
 const PREY_MAXTURN = 2.5;           // rad/s (chaser has the edge)
 const PREY_VMAX = 160;
-const PREY_SPEED = process.env.PREY_SPEED != null ? parseFloat(process.env.PREY_SPEED) : 165;
+const PREY_SPEED = process.env.PREY_SPEED != null ? parseFloat(process.env.PREY_SPEED) : 160;
 const LEAD_TAU_CAP = 40;            // max imagination steps
 
 // ---------------- RNG (mulberry32 + Box-Muller) ----------------
@@ -87,7 +87,7 @@ function makePrey(type, rng) {
     'ou-turn'(dt, chaser) {
       omega += (-1.0 * omega) * dt + 0.8 * Math.sqrt(dt) * rng.gauss();
       h = wrapAngle(h + omega * dt);
-      setVel(h, 165);
+      setVel(h, PREY_SPEED);
       move();
     },
 

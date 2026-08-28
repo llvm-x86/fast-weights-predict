@@ -55,6 +55,9 @@ a biologically plausible three-factor Hebbian rule.
 | circle-fit | predictor | least-squares circle fit + extrapolation (analytic specialist) |
 | **bdh** | predictor | Hebbian fast-weight world model + open-loop imagination |
 | bdh-cl | predictor | the same world model + closed-loop imagination |
+| wm-sgd | predictor | plain LMS world model (same features/rollout, no gating/decay) |
+| wm-rls | predictor | recursive-least-squares world model (optimal online linear) |
+| wm-mlp | predictor | one-hidden-layer MLP world model (Adam) |
 | pure-pursuit | policy | steer at current prey (reflex, no prediction) |
 | MPC | policy | model-based search over 8 headings (first-order prey model) |
 | linear-Q | policy | linear FA + TD(0) + ε-greedy (the evaluative reading) |
@@ -92,7 +95,16 @@ predictor per environment. On `circling`, the world model beats first-order by +
 second-order by +196% (both significant, p ≤ 0.0031); a hand-crafted circle-fitter is
 the only predictor that exceeds it there, and only on the smooth-curve prey it is
 designed for. See `results.md` and §5 of `paper.md` for the complete tables, the
-significance tests, the noise sweep, and the closed-loop ablation.
+significance tests, the noise sweep, the closed-loop ablation, and the formulation comparison.
+
+A **world-model formulation comparison** (Table 4, §5.6) asks whether the *specific* Hebbian
+rule matters. It does **not** make BDH the accuracy optimum: recursive least squares (RLS) — the
+optimal online linear estimator — ties BDH on `const-vel` and beats it on every other stationary
+prey (`circling` 416 vs 385, `jump` 349 vs 296), and plain LMS is statistically
+indistinguishable from BDH on `circling` (p = 0.68). But BDH is the only formulation realizable
+by local, three-factor synaptic plasticity, and it *decisively* beats RLS on reactive `flee`
+prey (178 vs 86, p = 2.4e-9). The MLP is worst on every stationary prey, confirming that a
+linear content-addressable memory is the right model class for these smooth dynamics.
 
 ## Limitations
 

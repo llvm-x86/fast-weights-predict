@@ -42,7 +42,12 @@ second-order analytic extrapolation by $18\%$ and $196\%$ respectively, because 
 the learned dynamics is more accurate than a truncated Taylor series. The advantage is
 significant under a two-sided Welch test, survives a noise sweep (vanishing only where the
 motion becomes genuinely unpredictable), and a closed-loop imagination variant does not help ---
-pointing to a robust effect. We interpret the results as supporting a Dreamer-style division of
+pointing to a robust effect. A formulation comparison then asks whether the \emph{specific}
+Hebbian update rule matters: it does not make the model the accuracy optimum --- a
+recursive-least-squares world model matches or beats it on every stationary prey --- but it is
+the only formulation realizable by local, three-factor synaptic plasticity, and it is uniquely
+robust to nonstationary (reactive) prey, beating the optimal estimator more than two-to-one. We
+interpret the results as supporting a Dreamer-style division of
 labor: fast-weight memories are best understood as \emph{predictive} substrates trained by
 dense self-supervised error, with sparse, outcome-driven planning on top, rather than as
 value-function approximators.
@@ -294,7 +299,9 @@ learning rate $\eta = 0.5$, and weight decay $\lambda = 10^{-3}$.
 
 The model-free learners receive a dense reward $r = -\text{distance}/600$ plus a $+1$ catch
 bonus, so their failure is a credit-assignment/interception failure rather than an artifact of
-sparse reward.
+sparse reward. Section~\ref{sec:formulation} additionally varies the \emph{update rule} of the
+world model itself (plain LMS, recursive least squares, and an MLP) to ask whether the
+fast-weight formulation is necessary.
 
 \subsection{Result 1: world model vs.\ value function}
 
@@ -434,7 +441,12 @@ comparisons. The world model's advantage over both analytic extrapolators on \te
 is significant ($p \le 0.0031$); the circle-fit specialist's edge over the world model on
 \texttt{circling} is significant but small ($p = 0.048$); the model-free learners' collapse
 below the reflex is highly significant ($p < 10^{-4}$); and the closed-loop variant's
-\emph{worsening} on \texttt{flee} is highly significant ($p = 4.6 \times 10^{-6}$).
+\emph{worsening} on \texttt{flee} is highly significant ($p = 4.6 \times 10^{-6}$). The
+formulation comparisons (Section~\ref{sec:formulation}) are equally decisive: the optimal RLS
+estimator beats BDH on \texttt{jump} ($p = 1.0 \times 10^{-8}$) and on
+\texttt{ou-turn}/\texttt{ou-vel}, while BDH beats RLS on \texttt{flee}
+($p = 2.4 \times 10^{-9}$); plain LMS is indistinguishable from BDH on \texttt{circling}
+($p = 0.68$), and the MLP is decisively worse ($p = 2.2 \times 10^{-9}$).
 
 \begin{table}[t]
 \centering
@@ -447,8 +459,16 @@ comparison & prey & $t$ & $p$ \\
 \midrule
 BDH vs velocity-lead & circling & 3.43 & 0.0031 \\
 BDH vs accel-lead & circling & 4.10 & 0.0022 \\
-circle-fit vs BDH & circling & 2.21 & 0.048 \\
 BDH-cl vs BDH & flee & $-8.07$ & $4.6\times 10^{-6}$ \\
+circle-fit vs BDH & circling & 2.21 & 0.048 \\
+BDH vs SGD (LMS) & circling & 0.43 & 0.68 \\
+BDH vs RLS & circling & $-2.11$ & 0.053 \\
+BDH vs MLP & circling & 14.92 & $2.2\times 10^{-9}$ \\
+BDH vs RLS & flee & 20.86 & $2.4\times 10^{-9}$ \\
+BDH vs RLS & jump & $-10.59$ & $1.0\times 10^{-8}$ \\
+BDH vs RLS & ou-turn & $-6.18$ & $8.9\times 10^{-6}$ \\
+BDH vs RLS & ou-vel & $-4.76$ & $1.6\times 10^{-4}$ \\
+BDH vs SGD (LMS) & flee & 11.39 & $3.7\times 10^{-9}$ \\
 SAC vs reflex & circling & $-6.90$ & $5.1\times 10^{-5}$ \\
 DQN vs reflex & circling & $-7.17$ & $4.6\times 10^{-5}$ \\
 \bottomrule
@@ -492,6 +512,86 @@ better elsewhere (Table~\ref{tab:results}). This is a negative result: as implem
 does not transfer to reactive prey, and we leave modeling the pursuit--evasion interaction as
 future work (Section~\ref{sec:future}).
 
+\subsection{Result 3: is the fast-weight rule necessary?}\label{sec:formulation}
+
+The results so far show that a world model \emph{helps}, but not whether the \emph{specific}
+Dragon-Hatchling update rule --- normalized error-gated Hebbian plasticity with weight decay ---
+is what does the work, or whether any online learner would. We re-run the predictor comparison
+with the world model's update rule replaced by three alternatives, holding the feature space,
+the $\tau$-step rollout, and the lead-pursuit planner fixed:
+
+\begin{itemize}
+\item \texttt{sgd} (LMS): plain online least-mean-squares,
+  $W \leftarrow W + \eta\,(y - \hat y)\,\phi^\top$, with no normalization, no error gating, and
+  no decay \cite{widrow1960}.
+\item \texttt{rls}: recursive least squares --- the optimal online \emph{linear} estimator ---
+  maintaining a full $D\times D$ covariance matrix with exponential forgetting
+  ($\lambda = 0.999$) \cite{plackett1950}.
+\item \texttt{mlp}: a one-hidden-layer (16-unit ReLU) network trained online with Adam
+  \cite{kingma2015}, the nonlinear analog of the same mapping.
+\end{itemize}
+
+Table~\ref{tab:formulation} reports catches. Three findings follow.
+
+\begin{enumerate}
+\item \textbf{The optimal classical estimator beats the Hebbian rule on stationary prey.} RLS
+  ties BDH on \texttt{const-vel} ($398$ vs.\ $397$) and beats it on every other stationary prey:
+  \texttt{circling} ($416 \pm 24$ vs.\ $385 \pm 41$, $p = 0.053$), \texttt{ou-turn}
+  ($371$ vs.\ $331$, $p = 8.9 \times 10^{-6}$), \texttt{ou-vel} ($399$ vs.\ $372$,
+  $p = 1.6 \times 10^{-4}$), and \texttt{jump} ($349$ vs.\ $296$, $p = 1.0 \times 10^{-8}$). In
+  raw predictive accuracy the fast-weight rule is therefore \emph{not} the optimum: a
+  full-covariance least-squares estimator is. Notably, RLS also reaches the circle-fit ceiling
+  on \texttt{circling} ($416$ vs.\ $415$), confirming that the world model's residual gap there
+  is a \emph{learning-efficiency} gap, not a representational one --- the circular dynamics are
+  linear in the velocity features (a fixed rotation), which the optimal estimator fits
+  near-perfectly.
+\item \textbf{The Hebbian rule's distinctive edge is adaptivity, not asymptotic accuracy.} On
+  the \emph{reactive} prey \texttt{flee}, the ranking reverses: BDH beats RLS by more than
+  two-to-one ($178 \pm 3$ vs.\ $86 \pm 14$, $p = 2.4 \times 10^{-9}$). The error-gated
+  three-factor update with weight decay tracks the rapidly changing prey-to-velocity map far
+  better than a slow-forgetting covariance estimator, which has effectively stopped adapting by
+  the time the prey's evasion policy has changed.
+\item \textbf{The specific Hebbian ingredients matter little on stationary prey, and
+  nonlinearity actively hurts.} Plain LMS is statistically indistinguishable from BDH on
+  \texttt{circling} ($374 \pm 71$ vs.\ $385 \pm 41$, $p = 0.68$) --- the normalization and decay
+  do not produce the world-model advantage there --- yet on \texttt{flee} BDH beats LMS too
+  ($178$ vs.\ $162$, $p = 3.7 \times 10^{-9}$), so the gating/decay contributes specifically
+  where the map is nonstationary. The MLP is the \emph{worst} formulation on every stationary
+  prey ($174$ vs.\ $385$ on \texttt{circling}, $p = 2.2 \times 10^{-9}$), reinforcing the
+  ablation of Section~\ref{sec:ablations}: a \emph{linear} content-addressable memory is the
+  right model class for smooth dynamics, and nonlinearity only adds variance.
+\end{enumerate}
+
+\begin{table}[t]
+\centering
+\caption{World-model formulation (mean $\pm$ sd catches, reset-on-catch, 10 seeds $\times$
+24{,}000).}
+\label{tab:formulation}
+\small
+\begin{tabular}{lcccc}
+\toprule
+prey & bdh (Dragon Hatchling) & sgd (LMS) & rls & mlp \\
+\midrule
+const-vel & $397 \pm 49$ & $398 \pm 51$ & $398 \pm 50$ & $297 \pm 128$ \\
+circling  & $385 \pm 41$ & $374 \pm 71$ & $\mathbf{416 \pm 24}$ & $174 \pm 19$ \\
+ou-turn   & $331 \pm 15$ & $336 \pm 8$  & $\mathbf{371 \pm 13}$ & $222 \pm 27$ \\
+ou-vel    & $372 \pm 13$ & $373 \pm 17$ & $\mathbf{399 \pm 13}$ & $258 \pm 33$ \\
+jump      & $296 \pm 13$ & $296 \pm 13$ & $\mathbf{349 \pm 9}$  & $254 \pm 13$ \\
+flee      & $\mathbf{178 \pm 3}$ & $162 \pm 4$ & $86 \pm 14$ & $161 \pm 8$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Interpretation.} ``Dragon Hatchling'' is best read as the \emph{plausible} world-model
+formulation: it is the only one realizable by local, outer-product, three-factor synaptic
+plasticity --- no $O(D^2)$ covariance matrix, no matrix inversion, no backpropagation --- and it
+remains \emph{competitive} with the optimal estimator on stationary prey (within $8\%$ on
+\texttt{circling}) while being \emph{uniquely} robust to nonstationarity (more than two-to-one
+on \texttt{flee}). It is not the accuracy champion; it is the formulation that trades a small
+asymptotic gap for locality and adaptivity. The headline contrast of
+Section~\ref{sec:experiments} --- world model versus value function --- is unaffected: RLS and
+BDH are both \emph{world models}, and both dominate the evaluative reading of the same memory.
+
 \section{Discussion}\label{sec:discussion}
 
 \subsection{Why model-free value learning fails here}
@@ -521,6 +621,13 @@ of the sparse catch reward. This is the Dreamer split \cite{hafner2023} in minia
 that a \emph{linear} associative memory suffices here suggests that, for smooth physical
 dynamics, content-addressable recall of local transitions is already a strong world model ---
 and that the ``fast weights'' of the BDH architecture are best read as a predictive substrate.
+Section~\ref{sec:formulation} sharpens this: the world-model advantage is a property of
+\emph{predicting}, not of the specific Hebbian rule, since the optimal RLS estimator matches or
+exceeds the Hebbian model on stationary prey. The Hebbian formulation's contribution is precisely
+where a biologically plausible substrate must earn its keep --- it reaches near-optimal accuracy
+using only local, outer-product updates, and it \emph{outperforms} the optimal estimator when the
+dynamics are nonstationary. Locality and adaptivity, not asymptotic optimality, are what the
+three-factor rule buys.
 
 \subsection{Limitations}\label{sec:limitations}
 
@@ -541,6 +648,10 @@ Specifically:
 \item On the smooth-turning prey, the hand-crafted circle-fit specialist beats the world model;
   the world model is a generalist that approaches but does not exceed the analytic ceiling on
   the prey that analytic model is designed for.
+\item The fast-weight update rule is \textbf{not the accuracy optimum}: the optimal RLS
+  estimator matches or beats it on every stationary prey (Section~\ref{sec:formulation}). The
+  Hebbian rule's case rests on its locality (biological plausibility) and its adaptivity on
+  nonstationary prey, not on raw predictive accuracy.
 \item The environment is single-prey, toroidal, and two-dimensional; real pursuit adds walls,
   multiple prey, partial observation, and sensing noise, and the model-free baselines (DQN,
   PPO, SAC) are not hyperparameter-tuned, so their failure is a lower bound on what tuned
@@ -550,8 +661,9 @@ Specifically:
 \subsection{Future work}\label{sec:future}
 
 With ten seeds, significance tests, a continuous-action baseline, an analytic circle-fit
-specialist, a noise sweep, and a closed-loop ablation in place, the remaining gaps are about
-\emph{generality}, not about the core contrast. Specifically: (i) \textbf{reactive prey} ---
+specialist, a noise sweep, a closed-loop ablation, and a world-model formulation comparison in
+place, the remaining gaps are about \emph{generality}, not about the core contrast.
+Specifically: (i) \textbf{reactive prey} ---
 neither open-loop nor closed-loop imagination beats first-order on \texttt{flee}; modeling the
 pursuer--evader interaction remains open. (ii) \textbf{standard benchmarks} --- reproducing the
 value-vs-world-model contrast on a standard interception or control suite, rather than this
@@ -573,7 +685,11 @@ $0$--$22$ catches --- and even strong model-free learners (DQN, PPO, SAC) fall b
 no-prediction reflex in every environment. The result is robust across a noise sweep and a
 closed-loop ablation, and is bounded honestly: on unpredictable motion no predictor beats
 first-order, and on smooth curved motion a hand-crafted circle-fitter remains the specialist
-ceiling that the general-purpose world model approaches from below. The result supports a clean
+ceiling that the general-purpose world model approaches from below. A formulation comparison
+adds the honest caveat that the \emph{specific} Hebbian rule is not the accuracy optimum --- a
+recursive-least-squares world model matches or beats it on stationary prey --- but it is the
+only local, biologically plausible formulation and it uniquely adapts to reactive prey, beating
+the optimal estimator more than two-to-one. The result supports a clean
 reading of fast-weight memories as predictive substrates trained by dense self-supervised
 error, with sparse outcome-driven planning on top --- a Dreamer-style division of labor
 instantiated by a biologically plausible three-factor Hebbian rule. We hope this reframing is
@@ -598,7 +714,7 @@ to reproduce every number in this paper are available at
 numpy-accelerated implementation used to produce all numbers in this paper; \texttt{bench.js}
 is the reference JavaScript implementation.
 
-\begin{thebibliography}{11}
+\begin{thebibliography}{14}
 
 \bibitem{bdh2025}
 A.~Kosowski, P.~Uzna\'nski, J.~Chorowski, Z.~Stamirowska, and M.~Bartoszkiewicz.
@@ -666,6 +782,17 @@ T.~Haarnoja, A.~Zhou, P.~Abbeel, and S.~Levine.
   stochastic actor.
 \newblock In \emph{Proceedings of the 35th International Conference on Machine Learning
   (ICML)}, 2018.
+
+\bibitem{plackett1950}
+R.~L. Plackett.
+\newblock Some theorems in least squares.
+\newblock \emph{Biometrika}, 37(1/2):149--157, 1950.
+
+\bibitem{kingma2015}
+D.~P. Kingma and J.~Ba.
+\newblock Adam: A method for stochastic optimization.
+\newblock In \emph{International Conference on Learning Representations (ICLR)}, 2015.
+\newblock arXiv:1412.6980.
 
 \end{thebibliography}
 

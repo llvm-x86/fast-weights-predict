@@ -305,12 +305,60 @@ def make_predictor(name, rng):
         pred = _make_bdh(rng, closed_loop=False)
     elif name == 'bdh-cl':
         pred = _make_bdh(rng, closed_loop=True)
+    elif name == 'wm-sgd':
+        pred = _make_wm_sgd(rng)
+    elif name == 'wm-rls':
+        pred = _make_wm_rls(rng)
+    elif name == 'wm-mlp':
+        pred = _make_wm_mlp(rng)
     else:
         raise ValueError('unknown predictor ' + name)
     pred['predict_lead'] = lambda p, ch: pred['predict_at'](p, ch, lead_steps(p, ch))
     return pred
 
-# ---------------- BDH content-addressable world model ----------------
+# ---------------- learned forward world models ----------------
+# Every world-model variant learns the same one-step mapping  phi(s_t) -> v_{t+1}
+# (next prey velocity) from the same per-step observations, then rolls the prey
+# forward tau steps under the learned dynamics. The variants differ ONLY in the
+# update rule (the learning formulation); the feature space, the rollout, and the
+# lead-pursuit planner that consumes the forecast are identical.
+
+WM_R = 700.0
+
+def _rollout_wm(fwd, p, chaser, steps, closed_loop=False):
+    steps = clamp(steps, 1, LEAD_TAU_CAP)
+    px, py = p['px'], p['py']
+    vx, vy = p['vx'], p['vy']
+    cx, cy = chaser['cx'], chaser['cy']
+    ch_h = chaser['heading']
+    for _ in range(steps):
+        vx, vy = fwd(px, py, vx, vy, cx, cy)
+        px = (px + vx * DT) % W
+        py = (py + vy * DT) % H
+        if closed_loop:
+            target = math.atan2(wrap_delta(py, cy, H), wrap_delta(px, cx, W))
+            ch_h = turn_toward(ch_h, target, CHASER_MAXTURN)
+            cx = (cx + math.cos(ch_h) * CHASE_MAX * DT) % W
+            cy = (cy + math.sin(ch_h) * CHASE_MAX * DT) % H
+    return {'x': px, 'y': py}
+
+def _wm_feature(px, py, vx, vy, cx, cy):
+    # linear feature vector (bias + 4 raw features); equals BDH with M=0
+    return [1.0,
+            wrap_delta(px, cx, W) / WM_R,
+            wrap_delta(py, cy, H) / WM_R,
+            vx / PREY_VMAX,
+            vy / PREY_VMAX]
+
+def _wm_raw4(px, py, vx, vy, cx, cy):
+    # raw 4-dim input for the MLP variant (the MLP supplies its own bias)
+    return [wrap_delta(px, cx, W) / WM_R,
+            wrap_delta(py, cy, H) / WM_R,
+            vx / PREY_VMAX,
+            vy / PREY_VMAX]
+
+
+# --- BDH (Dragon Hatchling): error-gated Hebbian fast-weight memory ---
 def _make_bdh(rng, closed_loop=False):
     R = 700.0
     VMAX = float(PREY_VMAX)
@@ -369,25 +417,119 @@ def _make_bdh(rng, closed_loop=False):
             WM[0][i] = WM[0][i] * wd + lr * ex * f[i]
             WM[1][i] = WM[1][i] * wd + lr * ey * f[i]
 
+    def fwd(px, py, vx, vy, cx, cy):
+        s = [wrap_delta(px, cx, W) / R, wrap_delta(py, cy, H) / R, vx / VMAX, vy / VMAX]
+        f = phi(s)
+        return _dot(WM[0], f) * VMAX, _dot(WM[1], f) * VMAX
+
     def predict_at(p, chaser, steps):
-        steps = clamp(steps, 1, LEAD_TAU_CAP)
-        px, py = p['px'], p['py']
-        vx, vy = p['vx'], p['vy']
-        cx, cy = chaser['cx'], chaser['cy']
-        ch_h = chaser['heading']
-        for _ in range(steps):
-            s = [wrap_delta(px, cx, W) / R, wrap_delta(py, cy, H) / R, vx / VMAX, vy / VMAX]
-            f = phi(s)
-            vx = _dot(WM[0], f) * VMAX
-            vy = _dot(WM[1], f) * VMAX
-            px = (px + vx * DT) % W
-            py = (py + vy * DT) % H
-            if closed_loop:
-                target = math.atan2(wrap_delta(py, cy, H), wrap_delta(px, cx, W))
-                ch_h = turn_toward(ch_h, target, CHASER_MAXTURN)
-                cx = (cx + math.cos(ch_h) * CHASE_MAX * DT) % W
-                cy = (cy + math.sin(ch_h) * CHASE_MAX * DT) % H
-        return {'x': px, 'y': py}
+        return _rollout_wm(fwd, p, chaser, steps, closed_loop)
+
+    return {'observe': observe, 'predict_at': predict_at,
+            'err': lambda: (math.sqrt(err_sq / err_n) if err_n else 0.0)}
+
+
+# --- SGD (LMS): plain online least-mean-squares, no error gating or decay ---
+def _make_wm_sgd(rng):
+    VMAX = float(PREY_VMAX)
+    D = 5
+    lr = float(os.environ.get('WM_SGD_LR', 0.1))
+    Wm = np.zeros((2, D), dtype=np.float64)
+    err_sq = 0.0
+    err_n = 0
+
+    def observe(prevP, nextP, chaser):
+        nonlocal err_sq, err_n, Wm
+        f = np.asarray(_wm_feature(prevP['px'], prevP['py'], prevP['vx'], prevP['vy'],
+                                   chaser['cx'], chaser['cy']), dtype=np.float64)
+        y = np.array([nextP['vx'] / VMAX, nextP['vy'] / VMAX], dtype=np.float64)
+        e = y - Wm @ f
+        err_sq += float(e[0] * e[0] + e[1] * e[1])
+        err_n += 1
+        Wm += lr * np.outer(e, f)
+
+    def fwd(px, py, vx, vy, cx, cy):
+        f = np.asarray(_wm_feature(px, py, vx, vy, cx, cy), dtype=np.float64)
+        o = Wm @ f
+        return float(o[0]) * VMAX, float(o[1]) * VMAX
+
+    def predict_at(p, chaser, steps):
+        return _rollout_wm(fwd, p, chaser, steps, False)
+
+    return {'observe': observe, 'predict_at': predict_at,
+            'err': lambda: (math.sqrt(err_sq / err_n) if err_n else 0.0)}
+
+
+# --- RLS: recursive least squares with exponential forgetting (optimal online linear) ---
+def _make_wm_rls(rng):
+    VMAX = float(PREY_VMAX)
+    D = 5
+    lam = float(os.environ.get('WM_RLS_LAM', 0.999))
+    delta = float(os.environ.get('WM_RLS_DELTA', 1.0))
+    P = np.eye(D, dtype=np.float64) / delta
+    Wm = np.zeros((2, D), dtype=np.float64)
+    err_sq = 0.0
+    err_n = 0
+
+    def observe(prevP, nextP, chaser):
+        nonlocal P, Wm, err_sq, err_n
+        f = np.asarray(_wm_feature(prevP['px'], prevP['py'], prevP['vx'], prevP['vy'],
+                                   chaser['cx'], chaser['cy']), dtype=np.float64)
+        y = np.array([nextP['vx'] / VMAX, nextP['vy'] / VMAX], dtype=np.float64)
+        yhat = Wm @ f
+        e = y - yhat
+        err_sq += float(e[0] * e[0] + e[1] * e[1])
+        err_n += 1
+        Pf = P @ f
+        denom = lam + float(f @ Pf)
+        k = Pf / denom
+        Wm += np.outer(e, k)
+        P = (P - np.outer(k, Pf)) / lam
+
+    def fwd(px, py, vx, vy, cx, cy):
+        f = np.asarray(_wm_feature(px, py, vx, vy, cx, cy), dtype=np.float64)
+        o = Wm @ f
+        return float(o[0]) * VMAX, float(o[1]) * VMAX
+
+    def predict_at(p, chaser, steps):
+        return _rollout_wm(fwd, p, chaser, steps, False)
+
+    return {'observe': observe, 'predict_at': predict_at,
+            'err': lambda: (math.sqrt(err_sq / err_n) if err_n else 0.0)}
+
+
+# --- MLP: one-hidden-layer network trained online with Adam ---
+def _make_wm_mlp(rng):
+    VMAX = float(PREY_VMAX)
+    hidden = int(os.environ.get('WM_MLP_HIDDEN', 16))
+    lr = float(os.environ.get('WM_MLP_LR', 1e-3))
+    net = MLP([4, hidden, 2], rng)
+    err_sq = 0.0
+    err_n = 0
+
+    def _in4(px, py, vx, vy, cx, cy):
+        return np.asarray(_wm_raw4(px, py, vx, vy, cx, cy), dtype=np.float64).reshape(1, 4)
+
+    def observe(prevP, nextP, chaser):
+        nonlocal err_sq, err_n
+        x = _in4(prevP['px'], prevP['py'], prevP['vx'], prevP['vy'], chaser['cx'], chaser['cy'])
+        acts, zs = net.forward(x)
+        yhat = acts[-1][0]
+        y = np.array([nextP['vx'] / VMAX, nextP['vy'] / VMAX], dtype=np.float64)
+        e = y - yhat
+        err_sq += float(e[0] * e[0] + e[1] * e[1])
+        err_n += 1
+        d_out = (yhat - y).reshape(1, 2)  # gradient of 1/2 MSE wrt output
+        net.backward(acts, zs, d_out, lr)
+
+    def fwd(px, py, vx, vy, cx, cy):
+        x = _in4(px, py, vx, vy, cx, cy)
+        acts, _ = net.forward(x)
+        o = acts[-1][0]
+        return float(o[0]) * VMAX, float(o[1]) * VMAX
+
+    def predict_at(p, chaser, steps):
+        return _rollout_wm(fwd, p, chaser, steps, False)
 
     return {'observe': observe, 'predict_at': predict_at,
             'err': lambda: (math.sqrt(err_sq / err_n) if err_n else 0.0)}
@@ -814,6 +956,7 @@ def _welch(a, b):
 # ---------------- main ----------------
 PREY = ['const-vel', 'circling', 'ou-turn', 'ou-vel', 'jump', 'flee']
 PREDICTORS = ['velocity-lead', 'accel-lead', 'kalman-lead', 'circle-fit', 'bdh', 'bdh-cl']
+WM_VARIANTS = ['bdh', 'wm-sgd', 'wm-rls', 'wm-mlp']
 POLICIES = ['pure-pursuit', 'mpc', 'linear-q', 'dqn', 'ppo', 'sac']
 
 def main():
@@ -831,17 +974,32 @@ def main():
     out.append('Protocol: reset-on-catch. Metric: catches per episode (mean ± sd over seeds).')
     out.append('')
 
+    all_preds = PREDICTORS + [p for p in WM_VARIANTS if p not in PREDICTORS]
+    pred_data = {}
+    for pt in PREY:
+        for pr in all_preds:
+            pred_data[(pt, pr)] = [run_episode(pt, pr, s, horizon, True)['catches'] for s in p_seeds]
+
     out.append('## Lead-pursuit predictors (mean ± sd, reset-on-catch, 10 seeds x 24000)')
     out.append('')
     out.append('| prey | velocity-lead | accel-lead | kalman-lead | circle-fit | bdh | bdh-cl |')
     out.append('|---|---|---|---|---|---|---|')
-    pred_data = {}
     for pt in PREY:
         row = [f'| {pt}']
         for pr in PREDICTORS:
-            cats = [run_episode(pt, pr, s, horizon, True)['catches'] for s in p_seeds]
-            pred_data[(pt, pr)] = cats
-            mean, sd = _mean_sd(cats)
+            mean, sd = _mean_sd(pred_data[(pt, pr)])
+            row.append(f' {mean:.0f} ± {sd:.0f}')
+        out.append(' |'.join(row) + ' |')
+    out.append('')
+
+    out.append('## World-model formulation (mean ± sd, reset-on-catch, 10 seeds x 24000)')
+    out.append('')
+    out.append('| prey | bdh (Dragon Hatchling) | sgd (LMS) | rls | mlp |')
+    out.append('|---|---|---|---|---|')
+    for pt in PREY:
+        row = [f'| {pt}']
+        for pr in WM_VARIANTS:
+            mean, sd = _mean_sd(pred_data[(pt, pr)])
             row.append(f' {mean:.0f} ± {sd:.0f}')
         out.append(' |'.join(row) + ' |')
     out.append('')
@@ -870,6 +1028,14 @@ def main():
         ('bdh', 'accel-lead', 'circling', 'BDH vs accel-lead', pred_data),
         ('bdh-cl', 'bdh', 'flee', 'BDH-cl vs BDH', pred_data),
         ('circle-fit', 'bdh', 'circling', 'circle-fit vs BDH', pred_data),
+        ('bdh', 'wm-sgd', 'circling', 'BDH vs SGD (LMS)', pred_data),
+        ('bdh', 'wm-rls', 'circling', 'BDH vs RLS', pred_data),
+        ('bdh', 'wm-mlp', 'circling', 'BDH vs MLP', pred_data),
+        ('bdh', 'wm-rls', 'flee', 'BDH vs RLS', pred_data),
+        ('bdh', 'wm-rls', 'jump', 'BDH vs RLS', pred_data),
+        ('bdh', 'wm-rls', 'ou-turn', 'BDH vs RLS', pred_data),
+        ('bdh', 'wm-rls', 'ou-vel', 'BDH vs RLS', pred_data),
+        ('bdh', 'wm-sgd', 'flee', 'BDH vs SGD (LMS)', pred_data),
         ('sac', 'pure-pursuit', 'circling', 'SAC vs reflex', pol_data),
         ('dqn', 'pure-pursuit', 'circling', 'DQN vs reflex', pol_data),
     ]

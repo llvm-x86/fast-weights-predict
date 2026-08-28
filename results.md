@@ -14,6 +14,17 @@ Protocol: reset-on-catch. Metric: catches per episode (mean ± sd over seeds).
 | jump | 342 ± 10 | 293 ± 8 | 133 ± 10 | 282 ± 6 | 296 ± 13 | 275 ± 16 |
 | flee | 195 ± 3 | 71 ± 10 | 9 ± 5 | 178 ± 2 | 178 ± 3 | 160 ± 7 |
 
+## World-model formulation (mean ± sd, reset-on-catch, 10 seeds x 24000)
+
+| prey | bdh (Dragon Hatchling) | sgd (LMS) | rls | mlp |
+|---|---|---|---|---|
+| const-vel | 397 ± 49 | 398 ± 51 | 398 ± 50 | 297 ± 128 |
+| circling | 385 ± 41 | 374 ± 71 | 416 ± 24 | 174 ± 19 |
+| ou-turn | 331 ± 15 | 336 ± 8 | 371 ± 13 | 222 ± 27 |
+| ou-vel | 372 ± 13 | 373 ± 17 | 399 ± 13 | 258 ± 33 |
+| jump | 296 ± 13 | 296 ± 13 | 349 ± 9 | 254 ± 13 |
+| flee | 178 ± 3 | 162 ± 4 | 86 ± 14 | 161 ± 8 |
+
 ## Policies (mean ± sd, reset-on-catch, 10 seeds x 20000)
 
 | prey | pure-pursuit | mpc | linear-q | dqn | ppo | sac |
@@ -33,6 +44,14 @@ Protocol: reset-on-catch. Metric: catches per episode (mean ± sd over seeds).
 | BDH vs accel-lead | circling | 4.103 | 0.002226 |
 | BDH-cl vs BDH | flee | -8.069 | 4.596e-06 |
 | circle-fit vs BDH | circling | 2.207 | 0.04838 |
+| BDH vs SGD (LMS) | circling | 0.427 | 0.6759 |
+| BDH vs RLS | circling | -2.105 | 0.05332 |
+| BDH vs MLP | circling | 14.919 | 2.174e-09 |
+| BDH vs RLS | flee | 20.864 | 2.411e-09 |
+| BDH vs RLS | jump | -10.593 | 1.018e-08 |
+| BDH vs RLS | ou-turn | -6.175 | 8.86e-06 |
+| BDH vs RLS | ou-vel | -4.761 | 0.0001564 |
+| BDH vs SGD (LMS) | flee | 11.394 | 3.732e-09 |
 | SAC vs reflex | circling | -6.895 | 5.055e-05 |
 | DQN vs reflex | circling | -7.169 | 4.617e-05 |
 

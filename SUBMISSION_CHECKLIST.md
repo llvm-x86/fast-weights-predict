@@ -13,7 +13,7 @@ Legend: ✅ resolved · ⚠️ needs an input from you · ➖ not applicable
 | Item | Requirement | Status |
 |---|---|---|
 | A1 | **Title and authorship — no anonymous submissions** | ✅ Byline set to Gabriel Hill (gabriel@familyfungroup.com) in `paper.tex` and `paper.md`. |
-| A2 | Carefully prepared sections, figures, tables, references | ✅ Title, Abstract, §1–§7, Tables 1–3, 12 references, and a disclosures section are present. |
+| A2 | Carefully prepared sections, figures, tables, references | ✅ Title, Abstract, §1–§7, Tables 1–4, 14 references, and a disclosures section are present. |
 | A3 | Professional, sufficiently neutral tone | ✅ No promotional or extraneous content. |
 | A4 | Originality, novelty, significance; no misrepresentation | ✅ Honest, complete study. All numbers reproduce from `bench.py` (10 seeds); abstract and body percentages trace to Table 1; the prey speed is a consistent 160 px/s. |
 | A5 | Original work; no plagiarism; legal right to license | ✅ Original benchmark; the BDH paper is cited, not reproduced. |
@@ -26,11 +26,11 @@ Legend: ✅ resolved · ⚠️ needs an input from you · ➖ not applicable
 
 | Item | Requirement | Status |
 |---|---|---|
-| B1 | LaTeX (or PDF) source — **Markdown is not accepted** | ✅ `paper.tex` (11pt article, `amsmath`/`booktabs`/`hyperref`) compiles cleanly to `paper.pdf` (11 pages, letter, 1" margins; zero errors, zero undefined references). |
+| B1 | LaTeX (or PDF) source — **Markdown is not accepted** | ✅ `paper.tex` (11pt article, `amsmath`/`booktabs`/`hyperref`) compiles cleanly to `paper.pdf` (13 pages, letter, 1" margins; zero errors, zero undefined references). |
 | B2 | Single-spaced, 10–14pt type, ≥ 1" margins | ✅ `\documentclass[11pt]{article}` + `geometry[margin=1in]`. |
 | B3 | Machine readable | ✅ Standard LaTeX, no scanned text. |
 | B4 | No line numbers, watermarks, highlighted text, margin notes, referee remarks, slides, or obstructive copyright statements | ✅ None present. |
-| B5 | Complete references | ✅ 12 references (incl. SAC, Haarnoja et al.\ 2018); Frémaux & Gerstner cited uniformly as 2015; B. Widrow and BDH authors (Kosowski et al.) verified. |
+| B5 | Complete references | ✅ 14 references (incl. SAC, Haarnoja et al.\ 2018; Plackett 1950 for RLS; Kingma & Ba 2015 for Adam); Frémaux & Gerstner cited uniformly as 2015; B. Widrow and BDH authors (Kosowski et al.) verified. |
 | B6 | Code/data links must resolve to a **public** repository | ✅ Published at <https://github.com/llvm-x86/fast-weights-predict>; URL referenced in `paper.tex` and `paper.md`. |
 
 ## C. Generative-AI policy (arXiv requires reporting, not prohibition)
@@ -49,7 +49,7 @@ Legend: ✅ resolved · ⚠️ needs an input from you · ➖ not applicable
   Evolutionary Computing) and `cs.AI` (Artificial Intelligence).
 - **License:** arXiv's default non-exclusive distribution license (or `CC BY 4.0` if you want
   open reuse -- your choice).
-- **Comments (optional):** `11 pages, 3 tables. Code: https://github.com/llvm-x86/fast-weights-predict`
+- **Comments (optional):** `13 pages, 4 tables. Code: https://github.com/llvm-x86/fast-weights-predict`
 
 **Abstract (plain ASCII text, for the metadata field — arXiv metadata rejects Unicode):**
 
@@ -71,7 +71,12 @@ Legend: ✅ resolved · ⚠️ needs an input from you · ➖ not applicable
 > respectively, because rolling forward the learned dynamics is more accurate than a truncated
 > Taylor series. The advantage is significant under a two-sided Welch test, survives a noise
 > sweep (vanishing only where the motion becomes genuinely unpredictable), and a closed-loop
-> imagination variant does not help -- pointing to a robust effect. We interpret the results as
+> imagination variant does not help -- pointing to a robust effect. A formulation comparison then
+> asks whether the specific Hebbian update rule matters: it does not make the model the accuracy
+> optimum -- a recursive-least-squares world model matches or beats it on every stationary prey
+> -- but it is the only formulation realizable by local, three-factor synaptic plasticity, and
+> it is uniquely robust to nonstationary (reactive) prey, beating the optimal estimator more than
+> two-to-one. We interpret the results as
 > supporting a Dreamer-style division of labor: fast-weight memories are best understood as
 > predictive substrates trained by dense self-supervised error, with sparse, outcome-driven
 > planning on top, rather than as value-function approximators.
@@ -79,7 +84,7 @@ Legend: ✅ resolved · ⚠️ needs an input from you · ➖ not applicable
 ## Before you upload
 
 1. Upload the **LaTeX source** (`paper.tex`, not the `.md`, and not the PDF alone) so arXiv can
-   build it. The PDF has already been compiled and verified locally (`paper.pdf`, 11 pages).
+   build it. The PDF has already been compiled and verified locally (`paper.pdf`, 13 pages).
 2. If you get an endorsement prompt (common for new `cs.*` accounts), request an endorsement
    from an existing arXiv contributor.
 

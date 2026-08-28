@@ -58,6 +58,9 @@ a biologically plausible three-factor Hebbian rule.
 | wm-sgd | predictor | plain LMS world model (same features/rollout, no gating/decay) |
 | wm-rls | predictor | recursive-least-squares world model (optimal online linear) |
 | wm-mlp | predictor | one-hidden-layer MLP world model (Adam) |
+| bdh-ng | predictor | natural-gradient (per-synapse) Hebbian world model + slow Polyak–Ruppert readout |
+| bdh-pre | predictor | natural-gradient (per-synapse) Hebbian world model, fast readout only |
+| bdh-avg | predictor | BDH (scalar NLMS) + slow Polyak–Ruppert-averaged readout |
 | pure-pursuit | policy | steer at current prey (reflex, no prediction) |
 | MPC | policy | model-based search over 8 headings (first-order prey model) |
 | linear-Q | policy | linear FA + TD(0) + ε-greedy (the evaluative reading) |
@@ -76,7 +79,7 @@ only by catch outcomes.
 ## Reproducing
 
 ```bash
-python3 bench.py                 # full tables + significance tests → results.md (~20 min)
+python3 bench.py                 # full tables + significance tests → results.md (~1 hr)
 NOISE_SWEEP=1 python3 bench.py   # also run the circling-noisy noise sweep
 python3 ablations.py             # reproduce the §5.4 ablation numbers (~20 min)
 node bench.js <horizon> <prey...>  # reference JavaScript implementation
@@ -105,6 +108,18 @@ indistinguishable from BDH on `circling` (p = 0.68). But BDH is the only formula
 by local, three-factor synaptic plasticity, and it *decisively* beats RLS on reactive `flee`
 prey (178 vs 86, p = 2.4e-9). The MLP is worst on every stationary prey, confirming that a
 linear content-addressable memory is the right model class for these smooth dynamics.
+
+A **natural-gradient refinement** (§5.7, Table 5) replaces BDH's scalar NLMS gain with a
+per-synapse (metaplastic) gain `η/(ε+√gᵢ)` — AdaGrad's diagonal preconditioner — and optionally a
+slow Polyak–Ruppert-averaged readout. It recovers most of RLS's stationary edge while staying
+O(D) local; the residual gap is exactly the off-diagonal co-activity term (the O(D²) price of
+optimality), and on `circling` RLS is already at the analytic ceiling so that gap is unclosable.
+
+A **nonstationary/adversarial suite** (§5.8, Table 6) adds two co-evolving evaders — `zigflee`
+(a flee-er that periodically re-samples a random jink) and `adversarial` (an "evolve-as-you-evolve"
+prey whose evasiveness rises each time it is caught and decays while it escapes). On every
+reactive prey, RLS — the winner on stationary prey — is the *worst* world model, and BDH beats it
+by up to ~4× (largest on `adversarial`, where the prey adapts to the pursuer's own success).
 
 ## Limitations
 

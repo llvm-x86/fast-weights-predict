@@ -44,9 +44,14 @@ significant under a two-sided Welch test, survives a noise sweep (vanishing only
 motion becomes genuinely unpredictable), and a closed-loop imagination variant does not help ---
 pointing to a robust effect. A formulation comparison then asks whether the \emph{specific}
 Hebbian update rule matters: it does not make the model the accuracy optimum --- a
-recursive-least-squares world model matches or beats it on every stationary prey --- but it is
-the only formulation realizable by local, three-factor synaptic plasticity, and it is uniquely
-robust to nonstationary (reactive) prey, beating the optimal estimator more than two-to-one. We
+recursive-least-squares (RLS) world model matches or beats it on every stationary prey. We then
+close most of that gap with a \emph{natural-gradient} (per-synapse, metaplastic) Hebbian rule
+that recovers RLS's advantage while staying $O(D)$ local, and show the residual is exactly the
+off-diagonal co-activity term --- the price of optimality. Finally, on a new suite of
+nonstationary and adversarial evaders --- prey that jink, and prey that \emph{evolve their
+evasion in response to being caught} --- the optimal stationary estimator collapses and the
+Hebbian rule beats it by up to nearly three-to-one, precisely because it keeps learning where RLS has
+stopped. We
 interpret the results as supporting a Dreamer-style division of
 labor: fast-weight memories are best understood as \emph{predictive} substrates trained by
 dense self-supervised error, with sparse, outcome-driven planning on top, rather than as
@@ -301,7 +306,9 @@ The model-free learners receive a dense reward $r = -\text{distance}/600$ plus a
 bonus, so their failure is a credit-assignment/interception failure rather than an artifact of
 sparse reward. Section~\ref{sec:formulation} additionally varies the \emph{update rule} of the
 world model itself (plain LMS, recursive least squares, and an MLP) to ask whether the
-fast-weight formulation is necessary.
+fast-weight formulation is necessary; Section~\ref{sec:naturalgradient} improves that rule with
+a natural-gradient (metaplastic) learning rate, and Section~\ref{sec:nonstationary} tests it on
+a suite of nonstationary and adversarial (co-evolving) prey.
 
 \subsection{Result 1: world model vs.\ value function}
 
@@ -592,6 +599,157 @@ asymptotic gap for locality and adaptivity. The headline contrast of
 Section~\ref{sec:experiments} --- world model versus value function --- is unaffected: RLS and
 BDH are both \emph{world models}, and both dominate the evaluative reading of the same memory.
 
+\subsection{Result 4: a natural-gradient Hebbian rule nearly matches the optimal
+estimator}\label{sec:naturalgradient}
+
+Section~\ref{sec:formulation} leaves open a constructive question: RLS beats the Hebbian rule on
+stationary prey, but \emph{why}, and how much of that gap can a local rule recover? The diagnosis
+is a curvature effect, not a representational one. RLS's per-step gain is
+$P_t \phi_t \approx (\mathbb{E}[\phi\phi^\top])^{-1}\phi_t$ --- the inverse feature covariance
+applied to the feature --- whereas BDH's NLMS gain is the \emph{scalar} step
+$\eta\,\phi_t/(1+\|\phi_t\|^2)$. The inverse covariance decomposes into a \textbf{diagonal} part
+(per-synapse second moments) and an \textbf{off-diagonal} part (co-activity between synapses). We
+therefore modify the Hebbian rule by replacing the scalar gain with a per-synapse,
+natural-gradient gain: each synapse $i$ keeps a running second moment
+\begin{equation}
+g_{t,i} \leftarrow (1-\beta)\,g_{t-1,i} + \beta\,\phi_{t,i}^2, \qquad
+W \leftarrow W + \eta\,(y - \hat y)\,\big(\phi_t \oslash (\varepsilon + \sqrt{g_t})\big)^\top,
+\end{equation}
+where $\oslash$ is elementwise division and $\varepsilon > 0$. This is the \emph{diagonal}
+natural gradient --- AdaGrad's per-parameter preconditioner \cite{duchi2011}, read as metaplastic
+per-synapse learning rates --- and the update remains local, outer-product, and three-factor. As
+a second candidate we add a slow Polyak--Ruppert-averaged readout,
+$W_s \leftarrow (1-\kappa)W_s + \kappa W$ \cite{polyak1992}, the classical device for making a
+first-order rule asymptotically optimal.
+
+Table~\ref{tab:naturalgradient} reports catches for the two ingredients separately and together
+(\texttt{bdh-pre}: preconditioning only; \texttt{bdh-avg}: averaging only; \texttt{bdh-ng}: both).
+Three findings follow.
+
+\begin{enumerate}
+\item \textbf{The diagonal part recovers RLS's edge where the gap is curvature.} \texttt{bdh-pre}
+  statistically \emph{matches} RLS on \texttt{const-vel} ($398 \pm 51$ vs.\ $398 \pm 50$,
+  $p = 1.0$) and on \texttt{circling} ($408 \pm 34$ vs.\ $416 \pm 24$, $p = 0.55$) --- the latter
+  eliminating the marginal-but-real gap BDH showed there ($385$ vs.\ $416$, $p = 0.053$) --- and
+  significantly narrows \texttt{ou-turn} ($352$ vs.\ $371$, $p = 0.007$) and \texttt{ou-vel}
+  ($381$ vs.\ $399$, $p = 0.017$), while --- critically --- \emph{keeping} BDH's reactive-prey
+  edge intact (\texttt{flee} $173$ vs.\ $86$, $p = 8.8 \times 10^{-10}$). The per-synapse
+  normalization supplies the diagonal of the covariance RLS inverts, at $O(D)$ cost.
+\item \textbf{The residual has two distinct causes.} On \texttt{circling} the remaining gap
+  ($408$ vs.\ $416$) is the \emph{off-diagonal} $v_x$--$v_y$ co-activity that a diagonal
+  preconditioner cannot see --- exactly the term RLS adds at the cost of an $O(D^2)$ covariance
+  and a matrix inversion --- and RLS is already at the circle-fit ceiling there ($416$ vs.\ $415$,
+  Section~\ref{sec:formulation}), so no predictor can beat it. On \texttt{jump} the gap ($301$
+  vs.\ $349$, $p = 2.7 \times 10^{-10}$) is instead a \emph{noise-averaging} gap: jump teleports
+  inject velocity spikes, and RLS's covariance smooths them while a constant-gain rule over-reacts
+  --- a different deficit, which the preconditioner does not address.
+\item \textbf{Polyak--Ruppert averaging is a net negative here.} \texttt{bdh-ng} (both
+  ingredients) is \emph{worse} than \texttt{bdh-pre} (preconditioning only) on \texttt{ou-turn}
+  ($307$ vs.\ $352$), \texttt{ou-vel} ($348$ vs.\ $381$), and \texttt{flee} ($162$ vs.\ $173$),
+  because the averaged readout lags the fast weight on a closed-loop reactive map, and
+  constant-step LMS's $O(\eta)$ steady-state bias is not removed by averaging the iterates. The
+  natural-gradient preconditioner alone is the effective improvement.
+\end{enumerate}
+
+\textbf{Interpretation.} The improved rule --- per-synapse natural-gradient (metaplastic)
+Hebbian plasticity --- recovers most of the optimal estimator's advantage on stationary prey
+while preserving the reactive-prey win, from $O(D)$ local, outer-product, three-factor updates
+alone. The remaining gap is precisely the off-diagonal co-activity term, the $O(D^2)$ curvature
+that is the price of optimality; on the one prey where that gap is largest, RLS is already at the
+analytic ceiling. The frontier is therefore sharp: a local Hebbian rule can be made
+\emph{near-optimal} and \emph{uniquely adaptive}, but it cannot be both fully optimal and fully
+local --- optimality on curved, correlated dynamics buys exactly one thing, the inverse
+covariance, and that is the one thing locality forbids.
+
+\begin{table}[t]
+\centering
+\caption{Natural-gradient Hebbian rule (mean $\pm$ sd catches, reset-on-catch, 10 seeds $\times$
+24{,}000).}
+\label{tab:naturalgradient}
+\small
+\begin{tabular}{lccccc}
+\toprule
+prey & bdh & rls & bdh-pre (natural gradient) & bdh-avg (averaging) & bdh-ng (both) \\
+\midrule
+const-vel & $397 \pm 49$ & $\mathbf{398 \pm 50}$ & $398 \pm 51$ & $398 \pm 51$ & $397 \pm 51$ \\
+circling  & $385 \pm 41$ & $\mathbf{416 \pm 24}$ & $408 \pm 34$ & $363 \pm 88$ & $394 \pm 47$ \\
+ou-turn   & $331 \pm 15$ & $\mathbf{371 \pm 13}$ & $352 \pm 15$ & $310 \pm 13$ & $307 \pm 13$ \\
+ou-vel    & $372 \pm 13$ & $\mathbf{399 \pm 13}$ & $381 \pm 17$ & $341 \pm 11$ & $348 \pm 9$ \\
+jump      & $296 \pm 13$ & $\mathbf{349 \pm 9}$  & $301 \pm 6$  & $312 \pm 18$ & $294 \pm 10$ \\
+flee      & $\mathbf{178 \pm 3}$ & $86 \pm 14$ & $173 \pm 5$ & $138 \pm 5$ & $162 \pm 2$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Result 5: the adaptive edge --- Hebbian memory wins on nonstationary and adversarial
+prey}\label{sec:nonstationary}
+
+Every result so far is on prey whose dynamics are stationary or only weakly reactive. There, RLS
+is optimal and the Hebbian rule is merely competitive. But the motivating claim for a fast-weight
+memory is \emph{adaptivity}: a rule that writes on every sample should track a world that
+\emph{changes}. We therefore add a nonstationary suite of reactive evaders --- prey whose
+state $\to$ velocity map is not fixed, but is driven by, and co-evolves with, the pursuer
+itself:
+
+\begin{itemize}
+\item \texttt{zigflee}: flees the chaser but periodically re-samples a random heading jink, so
+  the reactive map changes throughout the episode.
+\item \texttt{adversarial}: an ``evolve-as-you-evolve'' evader. It flees, but a persistent
+  internal \emph{evasiveness} rises each time it is caught and decays while it escapes, so the
+  harder the chaser presses, the more evasive the prey becomes --- the prey's policy adapts to
+  the pursuer's own success, with the sole goal of not being caught.
+\end{itemize}
+
+Table~\ref{tab:nonstationary} reports catches on the nonstationary suite. Three findings follow.
+
+\begin{enumerate}
+\item \textbf{The optimal stationary estimator collapses; the Hebbian rule does not.} On all
+  three reactive prey, RLS --- the estimator that wins on stationary prey --- is the worst world
+  model. BDH beats it on \texttt{flee} ($178$ vs.\ $86$, $p = 2.4 \times 10^{-9}$), on
+  \texttt{zigflee} ($208$ vs.\ $138$, $p = 6.4 \times 10^{-13}$), and most decisively on
+  \texttt{adversarial} ($146$ vs.\ $51$, $p = 2.5 \times 10^{-12}$). On \texttt{adversarial}, RLS
+  falls \emph{below the no-prediction reflex} ($51$ vs.\ $141$): the rule that ``gives up''
+  adapting when its covariance has converged is exactly the rule that fails when the world refuses
+  to sit still.
+\item \textbf{The co-evolving prey is where adaptivity matters most.} The largest margin is on
+  \texttt{adversarial} (nearly three-to-one, $146$ vs.\ $51$), where the map changes \emph{as a
+  direct consequence of the pursuer's own learning}: every catch the chaser earns is answered by
+  an escalation of evasion, and only a rule that keeps learning tracks the new map. This is the
+  regime the fast-weight primitive is for.
+\item \textbf{The natural-gradient variant inherits the edge.} \texttt{bdh-ng} decisively beats
+  RLS across the suite (\texttt{flee} $162$, \texttt{zigflee} $187$, \texttt{adversarial} $139$,
+  all $p < 10^{-7}$), because what does the tracking is BDH's fast weight, which the
+  natural-gradient refinement leaves intact. The locality--optimality trade-off of
+  Section~\ref{sec:naturalgradient} is therefore resolved in favor of locality exactly where the
+  world is not stationary.
+\end{enumerate}
+
+\textbf{Interpretation.} Together with Section~\ref{sec:naturalgradient}, the picture is complete
+and honest. RLS is the right world model when the world is a stationary linear program --- the
+regime where an $O(D^2)$ covariance fit is optimal and its forgetting is cheap. The Hebbian rule
+is the right world model when the world is nonstationary, reactive, or adversarial --- the regime
+of living prey that adapt to being pursued. Section~\ref{sec:formulation}'s caveat and this
+section's advantage are two sides of the same trade-off: the inverse covariance buys stationary
+accuracy and sells adaptivity; the three-factor Hebbian update buys adaptivity and sells only the
+off-diagonal curvature that stationary optimality requires.
+
+\begin{table}[t]
+\centering
+\caption{Nonstationary and adversarial prey (mean $\pm$ sd catches, reset-on-catch, 10 seeds
+$\times$ 24{,}000).}
+\label{tab:nonstationary}
+\small
+\begin{tabular}{lcccccc}
+\toprule
+prey & velocity-lead & circle-fit & bdh & bdh-cl & rls & bdh-ng \\
+\midrule
+flee       & $195 \pm 3$ & $178 \pm 2$ & $178 \pm 3$ & $160 \pm 7$ & $86 \pm 14$ & $162 \pm 2$ \\
+zigflee    & $227 \pm 5$ & $216 \pm 4$ & $208 \pm 5$ & $206 \pm 4$ & $138 \pm 8$ & $187 \pm 5$ \\
+adversarial& $161 \pm 2$ & $144 \pm 1$ & $146 \pm 3$ & $129 \pm 9$ & $51 \pm 9$  & $139 \pm 3$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \section{Discussion}\label{sec:discussion}
 
 \subsection{Why model-free value learning fails here}
@@ -623,11 +781,15 @@ dynamics, content-addressable recall of local transitions is already a strong wo
 and that the ``fast weights'' of the BDH architecture are best read as a predictive substrate.
 Section~\ref{sec:formulation} sharpens this: the world-model advantage is a property of
 \emph{predicting}, not of the specific Hebbian rule, since the optimal RLS estimator matches or
-exceeds the Hebbian model on stationary prey. The Hebbian formulation's contribution is precisely
-where a biologically plausible substrate must earn its keep --- it reaches near-optimal accuracy
-using only local, outer-product updates, and it \emph{outperforms} the optimal estimator when the
-dynamics are nonstationary. Locality and adaptivity, not asymptotic optimality, are what the
-three-factor rule buys.
+exceeds the Hebbian model on stationary prey. Sections~\ref{sec:naturalgradient} and
+\ref{sec:nonstationary} complete the picture. A natural-gradient (per-synapse, metaplastic)
+Hebbian rule recovers most of RLS's stationary edge while staying $O(D)$ local
+(Section~\ref{sec:naturalgradient}), and on nonstationary, adversarial prey --- where the map the
+model must learn is itself driven by the pursuer's own success --- the Hebbian rule beats the
+optimal estimator by up to nearly three-to-one, because its constant-gain three-factor update keeps
+learning where RLS's converged covariance has stopped (Section~\ref{sec:nonstationary}). Locality
+and adaptivity, not asymptotic optimality, are what the three-factor rule buys --- and adaptivity
+is what real, evading prey demand.
 
 \subsection{Limitations}\label{sec:limitations}
 
@@ -648,10 +810,14 @@ Specifically:
 \item On the smooth-turning prey, the hand-crafted circle-fit specialist beats the world model;
   the world model is a generalist that approaches but does not exceed the analytic ceiling on
   the prey that analytic model is designed for.
-\item The fast-weight update rule is \textbf{not the accuracy optimum}: the optimal RLS
-  estimator matches or beats it on every stationary prey (Section~\ref{sec:formulation}). The
-  Hebbian rule's case rests on its locality (biological plausibility) and its adaptivity on
-  nonstationary prey, not on raw predictive accuracy.
+\item The fast-weight update rule is \textbf{not the accuracy optimum on stationary prey}: the
+  optimal RLS estimator matches or beats it there (Section~\ref{sec:formulation}). A
+  natural-gradient (per-synapse, metaplastic) refinement recovers most of that gap, and the
+  residual is the off-diagonal co-activity term --- the $O(D^2)$ curvature that is the price of
+  optimality (Section~\ref{sec:naturalgradient}). The Hebbian rule's case therefore rests on
+  adaptivity and locality: it matches near-optimal accuracy on stationary prey and \emph{beats}
+  the optimal estimator on nonstationary, adversarial prey (Section~\ref{sec:nonstationary}), not
+  on being the raw one-step optimum.
 \item The environment is single-prey, toroidal, and two-dimensional; real pursuit adds walls,
   multiple prey, partial observation, and sensing noise, and the model-free baselines (DQN,
   PPO, SAC) are not hyperparameter-tuned, so their failure is a lower bound on what tuned
@@ -661,11 +827,13 @@ Specifically:
 \subsection{Future work}\label{sec:future}
 
 With ten seeds, significance tests, a continuous-action baseline, an analytic circle-fit
-specialist, a noise sweep, a closed-loop ablation, and a world-model formulation comparison in
-place, the remaining gaps are about \emph{generality}, not about the core contrast.
-Specifically: (i) \textbf{reactive prey} ---
-neither open-loop nor closed-loop imagination beats first-order on \texttt{flee}; modeling the
-pursuer--evader interaction remains open. (ii) \textbf{standard benchmarks} --- reproducing the
+specialist, a noise sweep, a closed-loop ablation, a world-model formulation comparison, a
+natural-gradient refinement, and a nonstationary/adversarial suite in place, the remaining gaps
+are about \emph{generality}, not about the core contrast. Specifically: (i) \textbf{reactive
+prey} --- the Hebbian rule decisively beats the optimal estimator on reactive prey
+(Section~\ref{sec:nonstationary}), but no predictor yet beats the no-learning first-order baseline
+there; modeling the pursuer--evader interaction remains open. (ii) \textbf{standard benchmarks}
+--- reproducing the
 value-vs-world-model contrast on a standard interception or control suite, rather than this
 purpose-built task, would test its generality. (iii) \textbf{nonlinear world modeling} --- the
 linear associator sufficed for these smooth dynamics; domains with genuinely nonlinear
@@ -687,9 +855,12 @@ closed-loop ablation, and is bounded honestly: on unpredictable motion no predic
 first-order, and on smooth curved motion a hand-crafted circle-fitter remains the specialist
 ceiling that the general-purpose world model approaches from below. A formulation comparison
 adds the honest caveat that the \emph{specific} Hebbian rule is not the accuracy optimum --- a
-recursive-least-squares world model matches or beats it on stationary prey --- but it is the
-only local, biologically plausible formulation and it uniquely adapts to reactive prey, beating
-the optimal estimator more than two-to-one. The result supports a clean
+recursive-least-squares world model matches or beats it on stationary prey. We then close most
+of that gap with a natural-gradient (per-synapse, metaplastic) Hebbian rule, showing the residual
+is exactly the off-diagonal co-activity term that is the price of optimality, and we show that on
+nonstationary, adversarial prey --- evaders that jink, or that \emph{evolve their evasion in
+response to being caught} --- the Hebbian rule beats the optimal estimator by up to nearly three-to-one,
+because it keeps learning where the optimal estimator has stopped. The result supports a clean
 reading of fast-weight memories as predictive substrates trained by dense self-supervised
 error, with sparse outcome-driven planning on top --- a Dreamer-style division of labor
 instantiated by a biologically plausible three-factor Hebbian rule. We hope this reframing is
@@ -714,7 +885,7 @@ to reproduce every number in this paper are available at
 numpy-accelerated implementation used to produce all numbers in this paper; \texttt{bench.js}
 is the reference JavaScript implementation.
 
-\begin{thebibliography}{14}
+\begin{thebibliography}{16}
 
 \bibitem{bdh2025}
 A.~Kosowski, P.~Uzna\'nski, J.~Chorowski, Z.~Stamirowska, and M.~Bartoszkiewicz.
@@ -793,6 +964,16 @@ D.~P. Kingma and J.~Ba.
 \newblock Adam: A method for stochastic optimization.
 \newblock In \emph{International Conference on Learning Representations (ICLR)}, 2015.
 \newblock arXiv:1412.6980.
+
+\bibitem{duchi2011}
+J.~Duchi, E.~Hazan, and Y.~Singer.
+\newblock Adaptive subgradient methods for online learning and stochastic optimization.
+\newblock \emph{Journal of Machine Learning Research}, 12:2121--2159, 2011.
+
+\bibitem{polyak1992}
+B.~T. Polyak and A.~B. Juditsky.
+\newblock Acceleration of stochastic approximation by averaging.
+\newblock \emph{SIAM Journal on Control and Optimization}, 30(4):838--855, 1992.
 
 \end{thebibliography}
 

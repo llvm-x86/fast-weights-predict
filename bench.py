@@ -108,6 +108,9 @@ def make_prey(type_, rng):
     noise_state = 0.0
     jump_t = 30
     noise = PREY_NOISE
+    e = 0.0          # adversarial: persistent evasiveness (rises on catch, decays on escape)
+    jink = 0         # zigflee: steps until the next random heading jink
+    bias = 0.0       # zigflee: current random heading offset
 
     P = {'px': px, 'py': py, 'vx': math.cos(h) * sp, 'vy': math.sin(h) * sp,
          'speed': sp, 'heading': h}
@@ -126,7 +129,7 @@ def make_prey(type_, rng):
         P['py'] = (P['py'] + P['vy'] * DT) % H
 
     def step(dt, chaser):
-        nonlocal h, sp, omega, noise_state, jump_t
+        nonlocal h, sp, omega, noise_state, jump_t, e, jink, bias
         t = type_
         if t == 'const-vel':
             move()
@@ -167,6 +170,38 @@ def make_prey(type_, rng):
             h = turn_toward(h, target_h, PREY_MAXTURN)
             flee = clamp(PREY_SPEED * 0.42 + PREY_SPEED * 0.6 * max(0.0, 1 - d / 300), 30, PREY_SPEED * 1.03)
             set_vel(h, flee)
+            move()
+        elif t == 'zigflee':
+            # Reactive evader with nonstationary jinks: flee directly away from the chaser, but
+            # periodically re-sample a random heading offset, so the reactive state->velocity map
+            # changes throughout the episode.
+            jink -= 1
+            if jink <= 0:
+                bias = (rng['next']() - 0.5) * 2.0
+                jink = 40 + math.floor(rng['next']() * 80)
+            dx = wrap_delta(P['px'], chaser['cx'], W)
+            dy = wrap_delta(P['py'], chaser['cy'], H)
+            d = math.hypot(dx, dy)
+            away = math.atan2(dy, dx)
+            h = turn_toward(h, away + bias + 0.3 * rng['gauss'](), PREY_MAXTURN)
+            flee = clamp(PREY_SPEED * 0.42 + PREY_SPEED * 0.6 * max(0.0, 1 - d / 300), 30, PREY_SPEED * 1.03)
+            set_vel(h, flee)
+            move()
+        elif t == 'adversarial':
+            # Co-adapting "evolve-as-you-evolve" prey: flee from the chaser, but a persistent
+            # evasiveness state rises each time the prey is caught and decays while it escapes,
+            # so the reactive map's intensity co-evolves with the chaser's own success.
+            if chaser.get('_caught'):
+                e = min(1.0, e + 0.2)
+                chaser['_caught'] = False
+            e *= (1.0 - dt / 8.0)                # 8 s escape decay
+            dx = wrap_delta(P['px'], chaser['cx'], W)
+            dy = wrap_delta(P['py'], chaser['cy'], H)
+            d = math.hypot(dx, dy)
+            away = math.atan2(dy, dx)
+            h = turn_toward(h, away + 0.4 * rng['gauss'](), PREY_MAXTURN)
+            flee = clamp(PREY_SPEED * 0.42 + PREY_SPEED * 0.6 * max(0.0, 1 - d / 300), 30, PREY_SPEED * 1.03)
+            set_vel(h, flee * (1.0 + 0.4 * e))
             move()
         else:
             raise ValueError('unknown prey ' + t)
@@ -311,6 +346,12 @@ def make_predictor(name, rng):
         pred = _make_wm_rls(rng)
     elif name == 'wm-mlp':
         pred = _make_wm_mlp(rng)
+    elif name == 'bdh-ng':
+        pred = _make_bdh_ng(rng, pre=True, avg=True)
+    elif name == 'bdh-avg':
+        pred = _make_bdh_ng(rng, pre=False, avg=True)
+    elif name == 'bdh-pre':
+        pred = _make_bdh_ng(rng, pre=True, avg=False)
     else:
         raise ValueError('unknown predictor ' + name)
     pred['predict_lead'] = lambda p, ch: pred['predict_at'](p, ch, lead_steps(p, ch))
@@ -534,6 +575,75 @@ def _make_wm_mlp(rng):
     return {'observe': observe, 'predict_at': predict_at,
             'err': lambda: (math.sqrt(err_sq / err_n) if err_n else 0.0)}
 
+
+# --- BDH-NG (Result 4): a natural-gradient, two-timescale Hebbian world model ---
+# Two purely local, biologically-motivated refinements of the BDH rule, each of which
+# supplies part of what RLS gets from its O(D^2) covariance matrix:
+#   (i)  per-synapse (diagonal natural-gradient) learning rates: replace the scalar NLMS
+#        gain with a running per-feature second-moment estimate (metaplasticity), so each
+#        synapse's step is scaled by the inverse of that feature's local curvature --- the
+#        diagonal of the covariance RLS inverts;
+#   (ii) a slow Polyak--Ruppert-averaged readout: a slowly-consolidated copy of the fast
+#        weights is used for prediction, averaging out the fast weights' misadjustment and
+#        converging to the least-squares solution (RLS's fixed point) without any matrix.
+# The fast weight still updates on every sample, so single-sample tracking on nonstationary
+# prey is preserved.  pre=False reproduces BDH's scalar NLMS gain; avg=False reads out the
+# fast weight directly, giving the two one-ingredient ablations.
+def _make_bdh_ng(rng, pre=True, avg=True):
+    VMAX = float(PREY_VMAX)
+    D = 5
+    eta = float(os.environ.get('WM_NG_ETA', 0.2))
+    lam = float(os.environ.get('WM_NG_LAM', 0.0))
+    beta = float(os.environ.get('WM_NG_BETA', 0.05))
+    kappa = float(os.environ.get('WM_NG_KAPPA', 0.05))
+    eps = float(os.environ.get('WM_NG_EPS', 1e-3))
+    uni = os.environ.get('WM_NG_UNI', '0') == '1'   # uniform (1/t) averaging instead of fixed kappa
+    Wf = np.zeros((2, D), dtype=np.float64)   # fast weights (tracking memory)
+    Ws = np.zeros((2, D), dtype=np.float64)   # slow weights (consolidated readout)
+    g = np.ones(D, dtype=np.float64)          # per-synapse second moment
+    err_sq = 0.0
+    err_n = 0
+    t = 0
+
+    def observe(prevP, nextP, chaser):
+        nonlocal err_sq, err_n, Wf, Ws, g, t
+        t += 1
+        f = np.asarray(_wm_feature(prevP['px'], prevP['py'], prevP['vx'], prevP['vy'],
+                                   chaser['cx'], chaser['cy']), dtype=np.float64)
+        y = np.array([nextP['vx'] / VMAX, nextP['vy'] / VMAX], dtype=np.float64)
+        e_update = y - (Wf @ f)   # self-consistent error for the fast recursion (stable LMS)
+        yhat = (Ws @ f) if avg else (Wf @ f)
+        e_read = y - yhat         # error of the prediction actually used by the planner
+        err_sq += float(e_read[0] * e_read[0] + e_read[1] * e_read[1])
+        err_n += 1
+        if pre:
+            if beta > 0.0:
+                g = (1.0 - beta) * g + beta * (f * f)   # leaky second moment (constant lr floor)
+            else:
+                g = g + (f * f)                          # AdaGrad accumulation (anneals to zero)
+            lr = eta / (eps + np.sqrt(g))                # per-synapse natural-gradient gain, shape (D,)
+            wd = 1.0 - lr * lam
+            Wf = Wf * wd[None, :] + np.outer(e_update, lr * f)
+        else:
+            nrm = float(f @ f)
+            lr = eta / (1.0 + nrm)             # BDH's scalar NLMS gain
+            wd = 1.0 - lr * lam
+            Wf = Wf * wd + lr * np.outer(e_update, f)
+        if avg:
+            kt = (1.0 / float(t)) if uni else kappa
+            Ws = (1.0 - kt) * Ws + kt * Wf
+
+    def fwd(px, py, vx, vy, cx, cy):
+        f = np.asarray(_wm_feature(px, py, vx, vy, cx, cy), dtype=np.float64)
+        o = (Ws if avg else Wf) @ f
+        return float(o[0]) * VMAX, float(o[1]) * VMAX
+
+    def predict_at(p, chaser, steps):
+        return _rollout_wm(fwd, p, chaser, steps, False)
+
+    return {'observe': observe, 'predict_at': predict_at,
+            'err': lambda: (math.sqrt(err_sq / err_n) if err_n else 0.0)}
+
 # ---------------- episode (lead-pursuit predictors) ----------------
 PRED_HORIZONS = [20, 40]
 
@@ -579,6 +689,7 @@ def run_episode(prey_type, predictor_name, seed, horizon, reset_on_catch=True):
         if d2 < CATCH_RADIUS and cooldown == 0:
             catches += 1
             cooldown = COOLDOWN_STEPS
+            chaser['_caught'] = True
             if reset_on_catch:
                 ang = rng['next']() * 2 * math.pi
                 dd = 400 + rng['next']() * 200
@@ -927,6 +1038,7 @@ def run_policy_episode(prey_type, policy_name, seed, horizon, reset_on_catch=Tru
             catches += 1
             cooldown = COOLDOWN_STEPS
             reward += 1
+            chaser['_caught'] = True
             if reset_on_catch:
                 ang = rng['next']() * 2 * math.pi
                 dd = 400 + rng['next']() * 200
@@ -954,9 +1066,12 @@ def _welch(a, b):
     return float('nan'), float('nan')
 
 # ---------------- main ----------------
-PREY = ['const-vel', 'circling', 'ou-turn', 'ou-vel', 'jump', 'flee']
+PREY = ['const-vel', 'circling', 'ou-turn', 'ou-vel', 'jump', 'flee',
+        'zigflee', 'adversarial']
+NONSTATIONARY_PREY = ['flee', 'zigflee', 'adversarial']
 PREDICTORS = ['velocity-lead', 'accel-lead', 'kalman-lead', 'circle-fit', 'bdh', 'bdh-cl']
 WM_VARIANTS = ['bdh', 'wm-sgd', 'wm-rls', 'wm-mlp']
+WM_IMPROVED = ['bdh-ng', 'bdh-avg', 'bdh-pre']
 POLICIES = ['pure-pursuit', 'mpc', 'linear-q', 'dqn', 'ppo', 'sac']
 
 def main():
@@ -974,7 +1089,7 @@ def main():
     out.append('Protocol: reset-on-catch. Metric: catches per episode (mean ± sd over seeds).')
     out.append('')
 
-    all_preds = PREDICTORS + [p for p in WM_VARIANTS if p not in PREDICTORS]
+    all_preds = PREDICTORS + [p for p in WM_VARIANTS if p not in PREDICTORS] + WM_IMPROVED
     pred_data = {}
     for pt in PREY:
         for pr in all_preds:
@@ -999,6 +1114,30 @@ def main():
     for pt in PREY:
         row = [f'| {pt}']
         for pr in WM_VARIANTS:
+            mean, sd = _mean_sd(pred_data[(pt, pr)])
+            row.append(f' {mean:.0f} ± {sd:.0f}')
+        out.append(' |'.join(row) + ' |')
+    out.append('')
+
+    out.append('## Improved world model: BDH-NG vs RLS (mean ± sd, reset-on-catch, 10 seeds x 24000)')
+    out.append('')
+    out.append('| prey | bdh | rls | bdh-ng (natural-gradient + averaging) | bdh-avg (averaging only) | bdh-pre (preconditioning only) |')
+    out.append('|---|---|---|---|---|---|')
+    for pt in PREY:
+        row = [f'| {pt}']
+        for pr in ['bdh', 'wm-rls'] + WM_IMPROVED:
+            mean, sd = _mean_sd(pred_data[(pt, pr)])
+            row.append(f' {mean:.0f} ± {sd:.0f}')
+        out.append(' |'.join(row) + ' |')
+    out.append('')
+
+    out.append('## Nonstationary and adversarial prey (Result 5, mean ± sd, 10 seeds x 24000)')
+    out.append('')
+    out.append('| prey | velocity-lead | circle-fit | bdh | bdh-cl | rls | bdh-ng |')
+    out.append('|---|---|---|---|---|---|---|')
+    for pt in NONSTATIONARY_PREY:
+        row = [f'| {pt}']
+        for pr in ['velocity-lead', 'circle-fit', 'bdh', 'bdh-cl', 'wm-rls', 'bdh-ng']:
             mean, sd = _mean_sd(pred_data[(pt, pr)])
             row.append(f' {mean:.0f} ± {sd:.0f}')
         out.append(' |'.join(row) + ' |')
@@ -1036,6 +1175,17 @@ def main():
         ('bdh', 'wm-rls', 'ou-turn', 'BDH vs RLS', pred_data),
         ('bdh', 'wm-rls', 'ou-vel', 'BDH vs RLS', pred_data),
         ('bdh', 'wm-sgd', 'flee', 'BDH vs SGD (LMS)', pred_data),
+        ('bdh-ng', 'wm-rls', 'circling', 'BDH-NG vs RLS', pred_data),
+        ('bdh-ng', 'wm-rls', 'ou-turn', 'BDH-NG vs RLS', pred_data),
+        ('bdh-ng', 'wm-rls', 'ou-vel', 'BDH-NG vs RLS', pred_data),
+        ('bdh-ng', 'wm-rls', 'jump', 'BDH-NG vs RLS', pred_data),
+        ('bdh-ng', 'wm-rls', 'const-vel', 'BDH-NG vs RLS', pred_data),
+        ('bdh-ng', 'wm-rls', 'flee', 'BDH-NG vs RLS', pred_data),
+        ('bdh-ng', 'bdh', 'circling', 'BDH-NG vs BDH', pred_data),
+        ('bdh-ng', 'bdh', 'flee', 'BDH-NG vs BDH', pred_data),
+        ('bdh', 'wm-rls', 'zigflee', 'BDH vs RLS', pred_data),
+        ('bdh', 'wm-rls', 'adversarial', 'BDH vs RLS', pred_data),
+        ('bdh-ng', 'wm-rls', 'adversarial', 'BDH-NG vs RLS', pred_data),
         ('sac', 'pure-pursuit', 'circling', 'SAC vs reflex', pol_data),
         ('dqn', 'pure-pursuit', 'circling', 'DQN vs reflex', pol_data),
     ]

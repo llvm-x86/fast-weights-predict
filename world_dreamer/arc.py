@@ -418,6 +418,52 @@ def remove_component(g, key):
     return out
 
 
+def map_flip(g, axis):
+    """Flip each object in place (reflect its bounding box across axis 'h' or
+    'v').  The object-wise analog of a global flip — the key 'map over objects'
+    ARC-AGI-2 family."""
+    bg = _bg(g)
+    out = [list(row) for row in g]
+    for color, cells in _components(g, bg):
+        rs = [r for r, _ in cells]
+        cs = [c for _, c in cells]
+        r0, c0, r1, c1 = min(rs), min(cs), max(rs), max(cs)
+        sub = [[bg] * (c1 - c0 + 1) for _ in range(r1 - r0 + 1)]
+        for r, c in cells:
+            sub[r - r0][c - c0] = color
+        t = flip(sub, axis)
+        for r in range(r1 - r0 + 1):
+            for c in range(c1 - c0 + 1):
+                out[r0 + r][c0 + c] = t[r][c]
+    return out
+
+
+def map_rotate(g, k):
+    """Rotate each object in place by k quarter-turns.  Requires every object's
+    bounding box to be square (otherwise an in-place rotation would change shape);
+    non-square-object grids are returned unchanged and simply fail to match."""
+    bg = _bg(g)
+    boxes = []
+    for color, cells in _components(g, bg):
+        rs = [r for r, _ in cells]
+        cs = [c for _, c in cells]
+        r0, c0, r1, c1 = min(rs), min(cs), max(rs), max(cs)
+        if (r1 - r0) != (c1 - c0):
+            return [list(row) for row in g]
+        boxes.append((color, cells, r0, c0, r1, c1))
+    out = [list(row) for row in g]
+    for color, cells, r0, c0, r1, c1 in boxes:
+        n = r1 - r0 + 1
+        sub = [[bg] * n for _ in range(n)]
+        for r, c in cells:
+            sub[r - r0][c - c0] = color
+        t = rotate(sub, k)
+        for r in range(n):
+            for c in range(n):
+                out[r0 + r][c0 + c] = t[r][c]
+    return out
+
+
 # ---------------------------------------------------------------- program search
 
 # A "program" is a closed-over function grid -> grid.  Search enumerates programs
@@ -567,6 +613,15 @@ def _enumerate_depth1(in0, out0, fast=False):
         if _tup(dilate(in0)) == target:
             yield ('dilate', lambda g: dilate(g))
 
+    # per-object map transforms (size-preserving) — color-preserving
+    if (h, w) == (H, W) and cdiff == 0:
+        for ax in ('h', 'v'):
+            if _tup(map_flip(in0, ax)) == target:
+                yield ('map_flip_' + ax, (lambda a: lambda g: map_flip(g, a))(ax))
+        for k in (1, 2, 3):
+            if _tup(map_rotate(in0, k)) == target:
+                yield ('map_rotate%d' % (90 * k), (lambda kk: lambda g: map_rotate(g, kk))(k))
+
     # crop to a single object (largest / smallest)
     for key in ('largest', 'smallest'):
         co = crop_component(in0, key)
@@ -627,6 +682,10 @@ def _unconditional_transitions(g):
     yield ('connect', lambda x: connect_points(x))
     yield ('connect_diag', lambda x: connect_diag(x))
     yield ('dilate', lambda x: dilate(x))
+    for ax in ('h', 'v'):
+        yield ('map_flip_' + ax, (lambda a: lambda x: map_flip(x, a))(ax))
+    for k in (1, 2, 3):
+        yield ('map_rotate%d' % (90 * k), (lambda kk: lambda x: map_rotate(x, kk))(k))
     for key in ('largest', 'smallest'):
         yield ('crop_' + key, (lambda kk: lambda x: crop_component(x, kk))(key))
     for c in cols:

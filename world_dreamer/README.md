@@ -49,7 +49,8 @@ primitive library covers two kinds of transformation:
 - **objectness + completion** (v2) — 4-connected object decomposition, gravity
   (four directions), mirror-image completion across the central axis, connecting
   same-colored points (orthogonal and diagonal), dilation, crop/remove the
-  largest or smallest object, keep-only-one-color, and recolor-objects-by-size.
+  largest or smallest object, keep-only-one-color, recolor-objects-by-size, and
+  per-object map transforms (flip / rotate each object in place).
 
 The dreamer is a **program-composition search**: depth-1 primitives, plus
 depth-2 and depth-3 compositions `f3 ∘ f2 ∘ f1` where intermediate steps are
@@ -68,8 +69,9 @@ processes (the tasks are pure Python, so the GIL rules out threads).
 | depth-3 beam=16 | 41 / 400 (10.3%) | ~70 s |
 
 ```bash
-python3 eval_arc.py /tmp/arc-agi/data/training 12 2   # depth 2 (default)
-python3 eval_arc.py /tmp/arc-agi/data/training 12 3   # depth 3
+python3 eval_arc.py /tmp/arc-agi/data/training 12 2     # ARC-AGI-1, depth 2 (default)
+python3 eval_arc.py /tmp/arc-agi/data/training 12 3     # ARC-AGI-1, depth 3
+python3 eval_arc.py /tmp/ARC-AGI-2/data/training 12 2   # ARC-AGI-2
 ```
 
 The solves are single-transformation, single-object, and short-composition tasks
@@ -80,6 +82,23 @@ numerosity, and sequence-extrapolation tasks that a hand-written primitive DSL
 with shallow search does not reach — which is precisely where ARC's difficulty
 lies, and where the ARC-AGI-3 frontier (symbolic world modeling / program search
 at scale) is aimed.
+
+### Does it generalize to ARC-AGI-2? (honest, measured)
+
+No — not in the "solved" sense, and it would be misleading to claim otherwise.
+Measured on the ARC-AGI-2 public training set (1,000 tasks), the exact same
+pipeline scores **45 / 1,000 (4.5%)**, down from 9.8% on ARC-AGI-1. ARC-AGI-2 was
+designed to remove the single-transformation tasks this DSL catches and to stress
+compositional object/relation reasoning, so the number drops — exactly as
+expected. The per-object map transforms added above are aimed at that core and
+add no tasks on the offline snapshot.
+
+What *does* generalize is the architecture, not the primitives: the same
+world-model-plus-dreamer recipe (predict, then plan inside the prediction) is
+instantiated on both substrates and on both ARC benchmarks. Closing the gap to
+ARC-AGI-2 is a program-induction research problem (LLM-guided program synthesis
+with a verifier-in-the-loop, or a much larger object-centric DSL with deep
+search), not a matter of adding more hand-written primitives.
 
 ## What this is not
 

@@ -113,6 +113,16 @@ by the planner, and that the route to high ARC scores is synthesis, not more
 hand-coded primitives. It is also *not* a 90% system: it is manual induction on a
 handful of tasks, not an automated solver.
 
+The same point holds when the dreamer is *automated*: `verify_solution.py` runs a
+language-model proposer (a solver agent per task) against the verifier. On an
+unbiased 8-task sample of ARC-AGI-2 tasks the primitive DSL scores 0/8 on, a
+single-shot LLM proposal (with one human repair) solves **5/8 (62.5%)** —
+`3b4c2228` (count 2×2 blocks), `6fa7a44f` (append vertical flip), `a57f2f04`
+(texture-fill), `bc4146bd` (mirror-scale), `00576224` (mirror-tile). Three harder
+tasks (rearrangement, denoising, region-fill) were not solved in budget. That is
+~14× the DSL on this sample, but a 5-task sample is not a benchmark score, and it
+is still far from 90%.
+
 ## What this is not
 
 This is **not** "an agent that solves ARC-AGI-1." No system "solves" ARC-AGI-1 in

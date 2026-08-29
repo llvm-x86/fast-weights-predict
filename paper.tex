@@ -55,7 +55,11 @@ stopped. A final section closes the one remaining gap --- the no-learning veloci
 by giving the Hebbian readout the \emph{bearing} to the pursuer (the argument of the reactive map)
 and shortening the lead horizon to the velocity-decorrelation time; this reaches the reactive
 frontier, beating every standard predictor while isolating the lead horizon, not the update rule,
-as the binding constraint on reactive prey. We
+as the binding constraint on reactive prey. Finally, we close the loop the paper's framing
+implies: we replace the analytic lead with the Dreamer planning step itself --- receding-horizon
+optimization \emph{inside} the learned world model (a ``world dreamer'') --- and show it beats the
+analytic lead by up to $\sim\!40\%$ on predictable prey while remaining bounded, exactly as the
+model is, by the predictability of the world. We
 interpret the results as supporting a Dreamer-style division of
 labor: fast-weight memories are best understood as \emph{predictive} substrates trained by
 dense self-supervised error, with sparse, outcome-driven planning on top, rather than as
@@ -291,6 +295,11 @@ learning rate $\eta = 0.5$, and weight decay $\lambda = 10^{-3}$.
     with the chaser held fixed (open loop).
   \item \texttt{bdh-cl}: the same world model rolled forward while the chaser is also imagined
     to pursue (closed loop).
+  \item \texttt{mpc-vel}: receding-horizon search over $48$ aim headings under a \emph{perfect}
+    constant-velocity model, scored by imagined time-to-catch (Section~\ref{sec:dreamer}).
+  \item \texttt{world-dreamer}: the same search, but the prey is rolled forward by the
+    \emph{learned} BDH world model --- the Dreamer planning loop over the fast-weight substrate
+    (Section~\ref{sec:dreamer}).
   \end{itemize}
 \item \emph{Policies} (learn or select the heading directly):
   \begin{itemize}
@@ -314,7 +323,9 @@ world model itself (plain LMS, recursive least squares, and an MLP) to ask wheth
 fast-weight formulation is necessary; Section~\ref{sec:naturalgradient} improves that rule with
 a natural-gradient (metaplastic) learning rate, and Section~\ref{sec:nonstationary} tests it on
 a suite of nonstationary and adversarial (co-evolving) prey; Section~\ref{sec:reactive} closes the
-remaining gap on reactive prey with a bearing feature and a decorrelation-adapted lead horizon.
+remaining gap on reactive prey with a bearing feature and a decorrelation-adapted lead horizon;
+Section~\ref{sec:dreamer} replaces the analytic lead entirely with optimization inside the learned
+world model.
 
 \subsection{Result 1: world model vs.\ value function}
 
@@ -827,6 +838,101 @@ statistic of the evader's intent, so the learned model's role there is represent
 the bearing gap --- rather than superiority over the fixed first-order rule that reads that velocity
 directly.
 
+\subsection{Result 7: the world dreamer --- optimizing in imagination}\label{sec:dreamer}
+
+Sections 5.2--5.9 established \emph{what} the fast-weight memory is (a world model, not a value
+function) and \emph{which rule} to update it with. Throughout, however, the planner has been one
+fixed, hand-written line: steer at the forecast of \texttt{velocity-lead}'s geometric horizon. This
+section replaces that line with the Dreamer loop the paper has been gesturing at
+(Section~\ref{sec:discussion}): at every tick, \emph{optimize} the chaser's aim by rolling candidate
+headings forward \emph{inside the learned world model}, and execute the best. The question is whether
+dreaming --- search over imagined futures under the learned dynamics --- beats analytic
+forecast-and-steer, and where it is bounded.
+
+\textbf{The planner.} At each tick the world dreamer shoots $N = 48$ candidate aim headings
+uniformly over the circle. For each aim it rolls the chaser forward $H = \text{lead\_steps}$ steps
+(capped at $40$) under its own exact unicycle kinematics --- turning toward the aim at the turn-rate
+limit, then flying straight --- while the prey is rolled forward \emph{autoregressively by the BDH
+world model} (the learned $s \mapsto v$ map). Each imagined trajectory is scored by time-to-catch: a
+candidate that enters the catch radius scores its first-catch step; a candidate that does not scores
+$H$ plus the remaining time estimated from the \emph{instantaneous closing rate} at the horizon
+(constant-closing-rate extrapolation, so the imagined objective stays close to the true time-to-catch
+even when the real catch lies past the horizon). The best aim is executed, and the search is repeated
+every tick (receding horizon). The model's weights are frozen during the rollout: it is trained on
+real transitions and then imagined against, exactly as in Dreamer.
+
+\textbf{The $2\times2$ control.} To isolate the planner from the model we run four predictors in one
+frame: \texttt{velocity-lead} (analytic lead + \emph{perfect} constant-velocity model),
+\texttt{mpc-vel} (the same search + \emph{perfect} constant-velocity model), \texttt{bdh} (analytic
+lead + \emph{learned} model), and \texttt{world-dreamer} (search + \emph{learned} model).
+\texttt{mpc-vel} is the crucial control: it asks whether the search buys anything when the model is
+already exact.
+
+\begin{table}[t]
+\centering
+\caption{World dreamer (mean $\pm$ sd catches, 10 seeds $\times$ 24{,}000). Best per row bold,
+second-best italic.}
+\label{tab:dreamer}
+\small
+\begin{tabular}{lccccc}
+\toprule
+prey & velocity-lead & mpc-vel & bdh & bdh-rd & world-dreamer \\
+\midrule
+const-vel   & $398 \pm 51$ & $\mathbf{509 \pm 65}$ & $397 \pm 49$ & $210 \pm 47$ & \emph{$508 \pm 65$} \\
+circling    & $327 \pm 35$ & $330 \pm 106$ & \emph{$385 \pm 41$} & $329 \pm 69$ & $\mathbf{457 \pm 25}$ \\
+ou-turn     & $368 \pm 17$ & $\mathbf{412 \pm 9}$ & $331 \pm 15$ & $276 \pm 9$ & \emph{$390 \pm 7$} \\
+ou-vel      & $398 \pm 14$ & $\mathbf{449 \pm 8}$ & $372 \pm 13$ & $298 \pm 12$ & \emph{$422 \pm 12$} \\
+jump        & $342 \pm 10$ & \emph{$346 \pm 11$} & $296 \pm 13$ & $\mathbf{353 \pm 11}$ & $323 \pm 10$ \\
+flee        & \emph{$195 \pm 3$} & $144 \pm 3$ & $178 \pm 3$ & $\mathbf{201 \pm 2}$ & $194 \pm 3$ \\
+zigflee     & \emph{$227 \pm 5$} & $177 \pm 6$ & $208 \pm 5$ & $\mathbf{237 \pm 3}$ & $224 \pm 3$ \\
+adversarial & \emph{$161 \pm 2$} & $93 \pm 4$ & $146 \pm 3$ & $\mathbf{166 \pm 1}$ & $157 \pm 2$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Three findings.}
+
+\begin{enumerate}
+\item \textbf{Dreaming beats the analytic lead on predictable prey.} \texttt{world-dreamer} exceeds
+  \texttt{velocity-lead} significantly on every predictable prey: $+28\%$ on \texttt{const-vel}
+  ($508$ vs.\ $398$, $p = 5.5\times10^{-4}$), $+40\%$ on \texttt{circling} ($457$ vs.\ $327$,
+  $p = 4.0\times10^{-8}$), $+6\%$ on \texttt{ou-turn} ($390$ vs.\ $368$,
+  $p = 3.7\times10^{-3}$), and $+6\%$ on \texttt{ou-vel} ($422$ vs.\ $398$,
+  $p = 6.8\times10^{-4}$). The control \texttt{mpc-vel} already beats \texttt{velocity-lead} on
+  \texttt{const-vel} ($+28\%$, $p = 5.4\times10^{-4}$), \texttt{ou-turn} ($+12\%$), and
+  \texttt{ou-vel} ($+13\%$), so on straight and noisy prey the gain is the \emph{objective}:
+  optimizing imagined time-to-catch beats the closed-form $\tau = d/v_c$ lead even when the model is
+  already exact. The analytic lead is a good heuristic, not the optimum. On \texttt{circling} the
+  search alone does not help (\texttt{mpc-vel} $330$ vs.\ \texttt{velocity-lead} $327$) --- the gain
+  there is the learned model (finding 2).
+\item \textbf{The learned model earns its keep exactly where the naive model is wrong.} On
+  \texttt{const-vel} the dreamer matches \texttt{mpc-vel} ($508$ vs.\ $509$): the Hebbian model has
+  converged to the true linear dynamics. On \texttt{circling} it \emph{beats} \texttt{mpc-vel} by
+  $+38\%$ ($457$ vs.\ $330$, $p = 4.3\times10^{-3}$) --- the constant-velocity model extrapolates the
+  tangent, the learned model has absorbed the curvature. On noisy \texttt{ou-turn}/\texttt{ou-vel} it
+  is slightly below the naive model ($-5\%$), the price of NLMS misadjustment against a perfect
+  current-velocity prior. On reactive prey the learned model is the difference between parity and
+  collapse: \texttt{mpc-vel}, which imagines a straight-fleeing prey, falls to $144/177/93$ on
+  \texttt{flee}/\texttt{zigflee}/\texttt{adversarial}, while \texttt{world-dreamer} stays at
+  $194/224/157$ ($p < 10^{-14}$). The world model's value is proportional to how wrong the naive
+  model is.
+\item \textbf{The dreamer inherits the world model's horizon --- and is bounded by it.} On reactive
+  prey the dreamer does not beat \texttt{bdh-rd} (the Section~\ref{sec:reactive} short-lead
+  baseline); it is significantly below it (flee $194$ vs.\ $201$; zigflee $224$ vs.\ $237$,
+  $p = 4.2\times10^{-8}$; adversarial $157$ vs.\ $166$, $p = 6.2\times10^{-9}$). On unpredictable
+  \texttt{jump} it is likewise below \texttt{velocity-lead} ($323$ vs.\ $342$). The reason is the
+  decorrelation argument of Section~\ref{sec:reactive}, now applied to the planner rather than the
+  forecast: a reactive evader re-aims against the pursuer's \emph{own} motion, so its velocity
+  decorrelates on a timescale shorter than any rollout horizon, and a model --- however well it has
+  learned the \emph{local} map --- cannot extrapolate the \emph{game}. The world dreamer is the world
+  model plus search, so its ceiling is the predictability of the world: dominant where the world is
+  predictable, matched-or-below where the world is a fixed point of its own steering.
+\end{enumerate}
+
+This is the cleanest realization of the paper's thesis: the fast-weight memory \emph{predicts}, the
+dreamer \emph{optimizes inside the prediction}, and the whole system's ceiling is set by the
+predictability of the world --- the honest boundary drawn throughout.
+
 \section{Discussion}\label{sec:discussion}
 
 \subsection{Why model-free value learning fails here}
@@ -869,7 +975,12 @@ Section~\ref{sec:reactive} completes the reactive picture: the linear readout's 
 \emph{bearing} was the model's one representational gap on reactive prey (closed by adding the unit
 bearing), and the lead horizon --- not the update rule --- is the planner's binding constraint there.
 Locality and adaptivity, not asymptotic optimality, are what the three-factor rule buys --- and
-adaptivity is what real, evading prey demand.
+adaptivity is what real, evading prey demand. Section~\ref{sec:dreamer} completes the architecture:
+when the analytic lead is itself replaced by the Dreamer loop --- optimizing the aim \emph{inside}
+the learned model --- the system beats the analytic lead on predictable prey (up to $\sim\!40\%$ on
+curved motion) and is bounded, exactly as the model is, by the predictability of the world. The
+fast-weight memory is therefore not merely a better forecast; it is a substrate you can plan
+\emph{inside}.
 
 \subsection{Limitations}\label{sec:limitations}
 
@@ -905,6 +1016,10 @@ Specifically:
   multiple prey, partial observation, and sensing noise, and the model-free baselines (DQN,
   PPO, SAC) are not hyperparameter-tuned, so their failure is a lower bound on what tuned
   methods could achieve.
+\item The world dreamer's \emph{planner} is hand-configured, not learned: the candidate count
+  ($N=48$), the rollout horizon, and the closing-rate terminal cost are fixed, and on reactive
+  prey the planner inherits --- rather than resolves --- the decorrelation horizon
+  (Section~\ref{sec:dreamer}). Learning the planning budget or the horizon itself is left open.
 \end{enumerate}
 
 \subsection{Future work}\label{sec:future}
@@ -924,7 +1039,11 @@ linear associator sufficed for these smooth dynamics; domains with genuinely non
 transitions are where a richer readout (Fourier features, or a deep successor) should be
 required. (iv) \textbf{tuned model-free baselines} --- DQN, PPO, and SAC were not exhaustively
 hyperparameter-tuned, so their collapse here is a documented failure of the \emph{interception}
-objective under default settings, not a claim that no RL method can ever intercept.
+objective under default settings, not a claim that no RL method can ever intercept. (v)
+\textbf{learning the planner} --- the world dreamer (Section~\ref{sec:dreamer}) still uses a fixed
+search budget and horizon; learning them, or training a Dreamer-style actor \emph{inside} the learned
+model rather than shooting over it, is the natural next step, and the reactive decorrelation horizon
+is exactly the case that would test whether a learned horizon can beat the hand-set one.
 
 \section{Conclusion}\label{sec:conclusion}
 
@@ -948,7 +1067,11 @@ because it keeps learning where the optimal estimator has stopped. A final refin
 remaining gap to the no-learning first-order baseline: adding the bearing to the Hebbian readout (so
 the reactive map is representable) and matching the lead horizon to the velocity-decorrelation time
 lets the world model reach the reactive frontier --- beating every standard predictor and isolating
-the lead horizon, not the update rule, as the binding constraint on reactive prey. The result
+the lead horizon, not the update rule, as the binding constraint on reactive prey. Finally, we
+complete the architecture the framing implies: replacing the analytic lead with optimization
+\emph{inside} the learned model (the world dreamer) beats the analytic lead by up to $\sim\!40\%$ on
+predictable prey, and inherits the model's own ceiling --- the predictability of the world --- on
+reactive and unpredictable prey. The result
 supports a clean
 reading of fast-weight memories as predictive substrates trained by dense self-supervised
 error, with sparse outcome-driven planning on top --- a Dreamer-style division of labor

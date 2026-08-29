@@ -359,9 +359,14 @@ def make_predictor(name, rng):
         pred = _make_bdh_ng(rng, pre=False, avg=True)
     elif name == 'bdh-pre':
         pred = _make_bdh_ng(rng, pre=True, avg=False)
+    elif name == 'world-dreamer':
+        pred = _make_world_dreamer(rng)
+    elif name == 'mpc-vel':
+        pred = _make_mpc_vel(rng)
     else:
         raise ValueError('unknown predictor ' + name)
-    pred['predict_lead'] = lambda p, ch: pred['predict_at'](p, ch, max(1, round(lead_steps(p, ch) * lead_scale)))
+    if 'predict_lead' not in pred:
+        pred['predict_lead'] = lambda p, ch: pred['predict_at'](p, ch, max(1, round(lead_steps(p, ch) * lead_scale)))
     return pred
 
 # ---------------- learned forward world models ----------------
@@ -486,7 +491,110 @@ def _make_bdh(rng, closed_loop=False, reactive=False):
         return _rollout_wm(fwd, p, chaser, steps, closed_loop)
 
     return {'observe': observe, 'predict_at': predict_at,
+            'get_W': lambda: WM,
             'err': lambda: (math.sqrt(err_sq / err_n) if err_n else 0.0)}
+
+
+# ---------------- imagination-based planning (world dreamer) ----------------
+# Shared receding-horizon shooting loop: the "dreamer" half of the world dreamer.
+# model(px, py, pvx, pvy, cx, cy) maps vectorized (n_aims,) state arrays to the
+# imagined next prey velocity; the chaser's own unicycle kinematics are exact.
+# Each candidate aim heading is rolled forward nsteps inside the model and scored
+# by imagined time-to-catch (with a closing-rate terminal cost for aims that do not
+# catch within the horizon), and the best aim is returned.  This replaces the
+# analytic intercept formula with optimization inside a world model.
+def _mpc_aim(model, p, chaser, n_aims, nsteps):
+    cx0, cy0 = chaser['cx'], chaser['cy']
+    h0 = chaser['heading']
+    aims = np.linspace(0.0, 2.0 * math.pi, n_aims, endpoint=False)
+    hx = np.full(n_aims, h0)
+    cx = np.full(n_aims, cx0)
+    cy = np.full(n_aims, cy0)
+    px = np.full(n_aims, p['px'])
+    py = np.full(n_aims, p['py'])
+    pvx = np.full(n_aims, p['vx'])
+    pvy = np.full(n_aims, p['vy'])
+    caught = np.full(n_aims, nsteps + 1, dtype=np.int64)
+    turn_step = CHASER_MAXTURN * DT
+    for k in range(1, nsteps + 1):
+        delta = (aims - hx + math.pi) % (2.0 * math.pi) - math.pi
+        hx = hx + np.clip(delta, -turn_step, turn_step)
+        cx = (cx + np.cos(hx) * CHASE_MAX * DT) % W
+        cy = (cy + np.sin(hx) * CHASE_MAX * DT) % H
+        pvx, pvy = model(px, py, pvx, pvy, cx, cy)
+        px = (px + pvx * DT) % W
+        py = (py + pvy * DT) % H
+        ddx = (px - cx + W / 2.0) % W - W / 2.0
+        ddy = (py - cy + H / 2.0) % H - H / 2.0
+        d = np.sqrt(ddx * ddx + ddy * ddy)
+        caught = np.where((d < CATCH_RADIUS) & (caught == nsteps + 1), k, caught)
+    # Terminal cost for aims that did not catch within the horizon: estimate the
+    # remaining time-to-catch from the horizon state using the instantaneous
+    # closing speed along the line of sight (constant-closing-rate extrapolation),
+    # instead of a fixed upper-bound speed.  This keeps the imagined objective
+    # close to the true time-to-catch even when the real catch lies past the horizon.
+    ch_vx = np.cos(hx) * CHASE_MAX
+    ch_vy = np.sin(hx) * CHASE_MAX
+    rx = (px - cx + W / 2.0) % W - W / 2.0
+    ry = (py - cy + H / 2.0) % H - H / 2.0
+    dend = np.sqrt(rx * rx + ry * ry)
+    closing = -(rx * (pvx - ch_vx) + ry * (pvy - ch_vy)) / np.maximum(dend, 1e-3)
+    closing = np.maximum(closing, 1e-6)
+    rem = dend / closing
+    score = np.where(caught <= nsteps, caught.astype(np.float64), nsteps + rem)
+    return aims[int(np.argmin(score))]
+
+
+def _make_world_dreamer(rng):
+    # Fast-weight world model (BDH) + imagination-based optimization: the world
+    # dreamer.  The BDH weights are trained online exactly as in `bdh`, but instead
+    # of an analytic lead, the chaser shoots candidate aim headings forward through
+    # the learned model and executes the aim that maximizes imagined success.
+    base = _make_bdh(rng, closed_loop=False)
+    N = int(os.environ.get('WD_N', 48))
+    HMAX = int(os.environ.get('WD_HMAX', 40))
+    VMAX = float(PREY_VMAX)
+    R = 700.0
+
+    def predict_lead(p, chaser):
+        Wm = np.asarray(base['get_W'](), dtype=np.float64)  # (2, D), D=5 for plain BDH (M=0)
+
+        def model(px, py, pvx, pvy, cx, cy):
+            dx = (px - cx + W / 2.0) % W - W / 2.0
+            dy = (py - cy + H / 2.0) % H - H / 2.0
+            f = np.stack([np.ones_like(px), dx / R, dy / R, pvx / VMAX, pvy / VMAX], axis=1)
+            o = f @ Wm.T
+            return o[:, 0] * VMAX, o[:, 1] * VMAX
+
+        nsteps = clamp(lead_steps(p, chaser), 1, HMAX)
+        theta = _mpc_aim(model, p, chaser, N, nsteps)
+        return {'x': chaser['cx'] + math.cos(theta) * 100.0,
+                'y': chaser['cy'] + math.sin(theta) * 100.0}
+
+    return {'observe': base['observe'], 'predict_at': base['predict_at'],
+            'predict_lead': predict_lead, 'err': base['err']}
+
+
+def _make_mpc_vel(rng):
+    # Control ablation: the same imagination/search loop, but with a *perfect*
+    # straight-line prey model (prey keeps its current velocity).  This isolates the
+    # planner from the world model — it should reproduce velocity-lead on straight
+    # prey, so any dreamer gains trace to the learned model, not the search.
+    N = int(os.environ.get('WD_N', 48))
+    HMAX = int(os.environ.get('WD_HMAX', 40))
+
+    def model(px, py, pvx, pvy, cx, cy):
+        return pvx, pvy
+
+    def predict_lead(p, chaser):
+        nsteps = clamp(lead_steps(p, chaser), 1, HMAX)
+        theta = _mpc_aim(model, p, chaser, N, nsteps)
+        return {'x': chaser['cx'] + math.cos(theta) * 100.0,
+                'y': chaser['cy'] + math.sin(theta) * 100.0}
+
+    vel = _make_velocity_lead()
+    return {'observe': lambda prev, nxt, ch: None, 'predict_at': vel['predict_at'],
+            'predict_lead': predict_lead, 'err': lambda: 0.0}
 
 
 # --- SGD (LMS): plain online least-mean-squares, no error gating or decay ---
@@ -1109,7 +1217,7 @@ def main():
     out.append('Protocol: reset-on-catch. Metric: catches per episode (mean ± sd over seeds).')
     out.append('')
 
-    all_preds = PREDICTORS + [p for p in WM_VARIANTS if p not in PREDICTORS] + WM_IMPROVED + WM_REACTIVE + ['velocity-lead-h']
+    all_preds = PREDICTORS + [p for p in WM_VARIANTS if p not in PREDICTORS] + WM_IMPROVED + WM_REACTIVE + ['velocity-lead-h', 'mpc-vel', 'world-dreamer']
     pred_data = {}
     for pt in PREY:
         for pr in all_preds:
@@ -1170,6 +1278,21 @@ def main():
     for pt in NONSTATIONARY_PREY:
         row = [f'| {pt}']
         for pr in ['velocity-lead', 'velocity-lead-h', 'bdh', 'bdh-r', 'bdh-rd', 'circle-fit']:
+            mean, sd = _mean_sd(pred_data[(pt, pr)])
+            row.append(f' {mean:.0f} ± {sd:.0f}')
+        out.append(' |'.join(row) + ' |')
+    out.append('')
+
+    out.append('## World dreamer: imagination-based optimization (Result 7, mean ± sd, 10 seeds x 24000)')
+    out.append('')
+    out.append('Planner x world-model 2x2: velocity-lead = analytic + perfect; mpc-vel = search + perfect;')
+    out.append('bdh = analytic + learned; world-dreamer = search + learned. bdh-rd is the reactive-adapted short-lead baseline.')
+    out.append('')
+    out.append('| prey | velocity-lead | mpc-vel | bdh | bdh-rd | world-dreamer |')
+    out.append('|---|---|---|---|---|---|')
+    for pt in PREY:
+        row = [f'| {pt}']
+        for pr in ['velocity-lead', 'mpc-vel', 'bdh', 'bdh-rd', 'world-dreamer']:
             mean, sd = _mean_sd(pred_data[(pt, pr)])
             row.append(f' {mean:.0f} ± {sd:.0f}')
         out.append(' |'.join(row) + ' |')
@@ -1237,6 +1360,18 @@ def main():
         ('velocity-lead-h', 'velocity-lead', 'flee', 'velocity-lead-h vs velocity-lead', pred_data),
         ('sac', 'pure-pursuit', 'circling', 'SAC vs reflex', pol_data),
         ('dqn', 'pure-pursuit', 'circling', 'DQN vs reflex', pol_data),
+        ('world-dreamer', 'velocity-lead', 'const-vel', 'world-dreamer vs velocity-lead', pred_data),
+        ('world-dreamer', 'velocity-lead', 'circling', 'world-dreamer vs velocity-lead', pred_data),
+        ('world-dreamer', 'velocity-lead', 'ou-turn', 'world-dreamer vs velocity-lead', pred_data),
+        ('world-dreamer', 'velocity-lead', 'ou-vel', 'world-dreamer vs velocity-lead', pred_data),
+        ('world-dreamer', 'bdh', 'const-vel', 'world-dreamer vs BDH', pred_data),
+        ('world-dreamer', 'bdh', 'circling', 'world-dreamer vs BDH', pred_data),
+        ('world-dreamer', 'mpc-vel', 'circling', 'world-dreamer vs mpc-vel (learned vs naive model)', pred_data),
+        ('world-dreamer', 'mpc-vel', 'flee', 'world-dreamer vs mpc-vel (learned vs naive model)', pred_data),
+        ('world-dreamer', 'mpc-vel', 'adversarial', 'world-dreamer vs mpc-vel (learned vs naive model)', pred_data),
+        ('mpc-vel', 'velocity-lead', 'const-vel', 'mpc-vel vs velocity-lead', pred_data),
+        ('world-dreamer', 'bdh-rd', 'zigflee', 'world-dreamer vs bdh-rd (reactive boundary)', pred_data),
+        ('world-dreamer', 'bdh-rd', 'adversarial', 'world-dreamer vs bdh-rd (reactive boundary)', pred_data),
     ]
     for a, b, pt, label, d in sigs:
         t, p = _welch(d.get((pt, a), []), d.get((pt, b), []))

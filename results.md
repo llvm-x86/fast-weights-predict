@@ -71,6 +71,22 @@ Protocol: reset-on-catch. Metric: catches per episode (mean ± sd over seeds).
 | zigflee | 224 ± 5 | 237 ± 3 | 239 ± 2 |
 | adversarial | 161 ± 1 | 166 ± 1 | 168 ± 2 |
 
+## World dreamer: imagination-based optimization (Result 7, mean ± sd, 10 seeds x 24000)
+
+Planner x world-model 2x2: velocity-lead = analytic + perfect; mpc-vel = search + perfect;
+bdh = analytic + learned; world-dreamer = search + learned. bdh-rd is the reactive-adapted short-lead baseline.
+
+| prey | velocity-lead | mpc-vel | bdh | bdh-rd | world-dreamer |
+|---|---|---|---|---|---|
+| const-vel | 398 ± 51 | 509 ± 65 | 397 ± 49 | 210 ± 47 | 508 ± 65 |
+| circling | 327 ± 35 | 330 ± 106 | 385 ± 41 | 329 ± 69 | 457 ± 25 |
+| ou-turn | 368 ± 17 | 412 ± 9 | 331 ± 15 | 276 ± 9 | 390 ± 7 |
+| ou-vel | 398 ± 14 | 449 ± 8 | 372 ± 13 | 298 ± 12 | 422 ± 12 |
+| jump | 342 ± 10 | 346 ± 11 | 296 ± 13 | 353 ± 11 | 323 ± 10 |
+| flee | 195 ± 3 | 144 ± 3 | 178 ± 3 | 201 ± 2 | 194 ± 3 |
+| zigflee | 227 ± 5 | 177 ± 6 | 208 ± 5 | 237 ± 3 | 224 ± 3 |
+| adversarial | 161 ± 2 | 93 ± 4 | 146 ± 3 | 166 ± 1 | 157 ± 2 |
+
 ## Policies (mean ± sd, reset-on-catch, 10 seeds x 20000)
 
 | prey | pure-pursuit | mpc | linear-q | dqn | ppo | sac |
@@ -131,6 +147,18 @@ Protocol: reset-on-catch. Metric: catches per episode (mean ± sd over seeds).
 | BDH-rd vs circle-fit | flee | 23.103 | 2.918e-14 |
 | velocity-lead-h vs velocity-lead | flee | 7.292 | 1.152e-06 |
 | BDH-r vs BDH | flee | 16.224 | 3.59e-12 |
+| world-dreamer vs velocity-lead | const-vel | 4.236 | 0.0005537 |
+| world-dreamer vs velocity-lead | circling | 9.650 | 4.014e-08 |
+| world-dreamer vs velocity-lead | ou-turn | 3.595 | 0.003658 |
+| world-dreamer vs velocity-lead | ou-vel | 4.105 | 0.000679 |
+| world-dreamer vs BDH | const-vel | 4.321 | 0.0004822 |
+| world-dreamer vs BDH | circling | 4.802 | 0.0002405 |
+| world-dreamer vs mpc-vel | circling | 3.669 | 0.004349 |
+| world-dreamer vs mpc-vel | flee | 38.692 | 9.611e-19 |
+| world-dreamer vs mpc-vel | adversarial | 42.458 | 2.397e-15 |
+| mpc-vel vs velocity-lead | const-vel | 4.251 | 0.0005367 |
+| world-dreamer vs bdh-rd | zigflee | -9.027 | 4.231e-08 |
+| world-dreamer vs bdh-rd | adversarial | -11.289 | 6.167e-09 |
 
 ## Noise sweep (circling-noisy, BDH vs velocity-lead, 10 seeds x 24000)
 

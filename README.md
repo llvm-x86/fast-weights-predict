@@ -64,6 +64,8 @@ a biologically plausible three-factor Hebbian rule.
 | bdh-r | predictor | BDH + unit bearing features (reactive map representable) |
 | bdh-rd | predictor | BDH + bearing features + halved lead (decorrelation-adapted) |
 | velocity-lead-h | predictor | velocity-lead with halved lead horizon (ablation) |
+| mpc-vel | predictor | receding-horizon search (48 aims) under a *perfect* constant-velocity model, scored by imagined time-to-catch |
+| world-dreamer | predictor | the same search, but the prey is rolled forward by the *learned* BDH world model (Dreamer loop over fast weights) |
 | pure-pursuit | policy | steer at current prey (reflex, no prediction) |
 | MPC | policy | model-based search over 8 headings (first-order prey model) |
 | linear-Q | policy | linear FA + TD(0) + ε-greedy (the evaluative reading) |
@@ -134,6 +136,14 @@ prey (p ≤ 5.8e-5). The honest decomposition: the halved horizon is the dominan
 (`velocity-lead-h` reaches 204/239/168), while the bearing features are the Hebbian-specific fix
 that closes the representational gap.
 
+A **world dreamer** (§5.10, Table 8) completes the architecture: it replaces the analytic lead
+with the Dreamer planning loop itself — receding-horizon optimization *inside* the learned world
+model. On predictable prey it beats the analytic lead (up to $\sim\!40\%$ on `circling`); on
+reactive prey it matches, but does not exceed, the §5.9 short-lead baseline, because the dreamer
+inherits the world model's own ceiling: the velocity-decorrelation time. The 2×2 control
+(`mpc-vel` vs `world-dreamer`, analytic vs search) isolates the gain — the search objective, not
+the model, on straight prey; the *learned* model, not the naive one, on curved and reactive prey.
+
 ## Limitations
 
 The result is strongest on curved, predictable motion — the case where predicting a
@@ -141,7 +151,9 @@ The result is strongest on curved, predictable motion — the case where predict
 motion no predictor beats first-order; on reactive prey the world model reaches — but does not
 exceed — a first-order rule (bearing features + decorrelation-adapted lead, §5.9); and a
 hand-crafted circle-fitter remains the specialist ceiling on smooth curved motion. The world model is a linear associative
-memory (the nonlinear Fourier expansion did not help on these smooth dynamics). See
+memory (the nonlinear Fourier expansion did not help on these smooth dynamics). The world
+dreamer's *planner* is hand-configured (fixed search budget, horizon, and terminal cost), and on
+reactive prey it inherits — rather than resolves — the decorrelation horizon (§5.10). See
 §6.3–6.4 of `paper.md` for the full discussion and future work.
 
 ## Files

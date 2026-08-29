@@ -51,24 +51,35 @@ primitive library covers two kinds of transformation:
   same-colored points (orthogonal and diagonal), dilation, crop/remove the
   largest or smallest object, keep-only-one-color, and recolor-objects-by-size.
 
-plus a two-step "extract the object, then transform it" composition. Every
-candidate program is verified against **all** training examples before it is used
-on the held-out test, so a wrong rule is filtered out rather than guessed.
+The dreamer is a **program-composition search**: depth-1 primitives, plus
+depth-2 and depth-3 compositions `f3 ∘ f2 ∘ f1` where intermediate steps are
+size-preserving/shrinking primitives (deduplicated by the intermediate grid) and
+the final step is matched to the target. Every candidate program is verified
+against **all** training examples before it is used on the held-out test, so a
+wrong rule is filtered out rather than guessed. Evaluation is parallel across 12
+processes (the tasks are pure Python, so the GIL rules out threads).
 
-**Result (honest, transparent): 32 / 400 (8.0%) of the ARC-AGI-1 training set,
-exact match on the held-out test output.**
+**Result (honest, transparent), exact match on the held-out test output:**
+
+| search depth | tasks solved | wall time (12 procs) |
+|---|---|---|
+| depth-1 | 31 / 400 (7.8%) | ~0.1 s |
+| depth-2 (default) | **39 / 400 (9.8%)** | ~11 s |
+| depth-3 beam=16 | 41 / 400 (10.3%) | ~70 s |
 
 ```bash
-python3 eval_arc.py /tmp/arc-agi/data/training
+python3 eval_arc.py /tmp/arc-agi/data/training 12 2   # depth 2 (default)
+python3 eval_arc.py /tmp/arc-agi/data/training 12 3   # depth 3
 ```
 
-The 32 solves are the single-transformation and single-object tasks (`rotate`,
-`translate`, `scale(2)`, `tile`, `self_substitute`, `fill_holes`, `mirror`,
-`gravity`, `connect`, `crop_largest`, …). The other 368 tasks are compositional,
-relational, numerosity, and sequence-extrapolation tasks that a hand-written
-primitive DSL does not reach — which is precisely where ARC's difficulty lies, and
-where the ARC-AGI-3 frontier (symbolic world modeling / program search at scale)
-is aimed.
+The solves are single-transformation, single-object, and short-composition tasks
+(`rotate`, `translate`, `scale(2)`, `tile`, `self_substitute`, `fill_holes`,
+`mirror`, `gravity`, `connect`, `crop_largest`, `recolor_by_size`, and two-step
+combinations of them). The other ~360 tasks are compositional, relational,
+numerosity, and sequence-extrapolation tasks that a hand-written primitive DSL
+with shallow search does not reach — which is precisely where ARC's difficulty
+lies, and where the ARC-AGI-3 frontier (symbolic world modeling / program search
+at scale) is aimed.
 
 ## What this is not
 

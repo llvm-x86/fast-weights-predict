@@ -21,6 +21,8 @@
 # v2 adds the two ARC priors that matter most beyond raw geometry: *objectness*
 # (decompose a grid into connected components and transform/crop/recolor whole
 # objects) and *completion* (gravity, mirror completion, connecting points).
+# v3 adds a program-*composition* search (depth-2/3 over primitive compositions,
+# deduplicated by intermediate grid, with cheap color-set/dimension guards).
 # Every primitive is verified against all training examples before it is used on
 # the held-out test, so a wrong rule is filtered out rather than guessed.
 
@@ -424,19 +426,35 @@ def remove_component(g, key):
 # survivors on every example.  This is the "dreamer": imagine each candidate
 # program's output and keep the one that predicts all observations.
 
-def _enumerate_depth1(in0, out0):
+def _anchor(g, h, w, bg=0):
+    for r in range(h):
+        for c in range(w):
+            if g[r][c] != bg:
+                return r, c
+    return None
+
+
+def _enumerate_depth1(in0, out0, fast=False):
+    """Enumerate every single primitive mapping in0 -> out0.
+
+    With fast=True the two expensive parameter sweeps (translation, recolor) use
+    a single closed-form candidate instead of a full scan; this is exact except
+    for the rare case where a translation clips the anchor cell, so it is used
+    only for the final step of depth-3 search, never for depth-1."""
     h, w = len(in0), len(in0[0])
     H, W = len(out0), len(out0[0])
     target = _tup(out0)
     cols = _colors(in0)
     bg = _bg(in0)
+    cdiff = len(cols ^ _colors(out0))  # color-set distance (for cheap guards)
 
     # identity
     if (h, w) == (H, W) and _tup(in0) == target:
         yield ('identity', lambda g: [list(r) for r in g])
 
-    # rotations / reflections (size-preserving; 'anti' requires square)
-    if (h, w) == (H, W):
+    # rotations / reflections (size-preserving; 'anti' requires square).
+    # These permute cells, so they can only match when the color sets are equal.
+    if (h, w) == (H, W) and cdiff == 0:
         for k in (1, 2, 3):
             if _tup(rotate(in0, k)) == target:
                 yield ('rotate%d' % (90 * k), (lambda kk: lambda g: rotate(g, kk))(k))
@@ -446,25 +464,54 @@ def _enumerate_depth1(in0, out0):
         if h == w and _tup(flip(in0, 'anti')) == target:
             yield ('flip_anti', lambda g: flip(g, 'anti'))
 
-    # translation (size-preserving, zero-fill); small window is the common case
-    if (h, w) == (H, W):
-        for dy in range(-6, 7):
-            for dx in range(-6, 7):
-                if (dx, dy) == (0, 0):
-                    continue
-                if _tup(translate(in0, dx, dy)) == target:
+    # translation (size-preserving, zero-fill); also color-preserving
+    if (h, w) == (H, W) and cdiff == 0:
+        if fast:
+            ai = _anchor(in0, h, w)
+            ao = _anchor(out0, h, w)
+            if ai is not None and ao is not None:
+                dx, dy = ao[1] - ai[1], ao[0] - ai[0]
+                if (dx, dy) != (0, 0) and _tup(translate(in0, dx, dy)) == target:
                     yield ('translate(%d,%d)' % (dx, dy),
                            (lambda dx_, dy_: lambda g: translate(g, dx_, dy_))(dx, dy))
+        else:
+            for dy in range(-6, 7):
+                for dx in range(-6, 7):
+                    if (dx, dy) == (0, 0):
+                        continue
+                    if _tup(translate(in0, dx, dy)) == target:
+                        yield ('translate(%d,%d)' % (dx, dy),
+                               (lambda dx_, dy_: lambda g: translate(g, dx_, dy_))(dx, dy))
 
-    # recolor (size-preserving): single color -> color, including background
-    if (h, w) == (H, W):
-        for c1 in cols:
-            for c2 in range(10):
-                if c2 == c1:
-                    continue
-                if _tup(recolor(in0, c1, c2)) == target:
-                    yield ('recolor(%d->%d)' % (c1, c2),
-                           (lambda a, b: lambda g: recolor(g, a, b))(c1, c2))
+    # recolor (size-preserving): single color -> color, including background.
+    # One swap changes the color set by at most two (one removed, one added).
+    if (h, w) == (H, W) and cdiff <= 2:
+        if fast:
+            for c1 in cols:
+                c2 = None
+                bad = False
+                for r in range(h):
+                    for c in range(w):
+                        if in0[r][c] == c1:
+                            if c2 is None:
+                                c2 = out0[r][c]
+                            elif out0[r][c] != c2:
+                                bad = True
+                                break
+                    if bad:
+                        break
+                if not bad and c2 is not None and c2 != c1:
+                    if _tup(recolor(in0, c1, c2)) == target:
+                        yield ('recolor(%d->%d)' % (c1, c2),
+                               (lambda a, b: lambda g: recolor(g, a, b))(c1, c2))
+        else:
+            for c1 in cols:
+                for c2 in range(10):
+                    if c2 == c1:
+                        continue
+                    if _tup(recolor(in0, c1, c2)) == target:
+                        yield ('recolor(%d->%d)' % (c1, c2),
+                               (lambda a, b: lambda g: recolor(g, a, b))(c1, c2))
 
     # scale (each cell -> k x k block)
     if H % h == 0 and W % w == 0 and H // h == W // w:
@@ -488,35 +535,35 @@ def _enumerate_depth1(in0, out0):
     if _tup(cr) == target:
         yield ('crop', lambda g: crop_to_bbox(g))
 
-    # flood fills (size-preserving)
-    if (h, w) == (H, W):
+    # flood fills (size-preserving); each adds at most one color
+    if (h, w) == (H, W) and cdiff <= 1:
         for c in range(10):
             if _tup(fill_from_border(in0, c)) == target:
                 yield ('fill_border(%d)' % c, (lambda cc: lambda g: fill_from_border(g, cc))(c))
             if _tup(fill_holes(in0, c)) == target:
                 yield ('fill_holes(%d)' % c, (lambda cc: lambda g: fill_holes(g, cc))(c))
 
-    # gravity (size-preserving), all four directions
-    if (h, w) == (H, W):
+    # gravity (size-preserving), all four directions — color-preserving
+    if (h, w) == (H, W) and cdiff == 0:
         for d in ('down', 'up', 'left', 'right'):
             if _tup(gravity(in0, d)) == target:
                 yield ('gravity_' + d, (lambda dd: lambda g: gravity(g, dd))(d))
 
-    # mirror completion (size-preserving)
-    if (h, w) == (H, W):
+    # mirror completion (size-preserving) — color-preserving
+    if (h, w) == (H, W) and cdiff == 0:
         for ax in ('h', 'v'):
             if _tup(mirror_union(in0, ax)) == target:
                 yield ('mirror_' + ax, (lambda a: lambda g: mirror_union(g, a))(ax))
 
-    # connect points (size-preserving)
-    if (h, w) == (H, W):
+    # connect points (size-preserving) — color-preserving
+    if (h, w) == (H, W) and cdiff == 0:
         if _tup(connect_points(in0)) == target:
             yield ('connect', lambda g: connect_points(g))
         if _tup(connect_diag(in0)) == target:
             yield ('connect_diag', lambda g: connect_diag(g))
 
-    # dilation (size-preserving)
-    if (h, w) == (H, W):
+    # dilation (size-preserving) — color-preserving
+    if (h, w) == (H, W) and cdiff == 0:
         if _tup(dilate(in0)) == target:
             yield ('dilate', lambda g: dilate(g))
 
@@ -547,37 +594,148 @@ def _enumerate_depth1(in0, out0):
             yield ('recolor_by_size', (lambda m: lambda g: recolor_by_size(g, m))(mapping))
 
 
-_PRE = {
-    'crop': crop_to_bbox,
-    'largest': lambda g: crop_component(g, 'largest'),
-    'smallest': lambda g: crop_component(g, 'smallest'),
-}
+def _unconditional_transitions(g):
+    """Size-preserving or shrinking primitives, with bounded parameters, used as
+    intermediate steps in composed programs.  Grow-only primitives (scale, tile,
+    self-substitution) are excluded because they commute with these transforms and
+    are always reachable as the final, target-matched step instead."""
+    cols = _colors(g)
+    bg = _bg(g)
+    for k in (1, 2, 3):
+        yield ('rotate%d' % (90 * k), (lambda kk: lambda x: rotate(x, kk))(k))
+    for ax in ('h', 'v', 'main', 'anti'):
+        yield ('flip_' + ax, (lambda a: lambda x: flip(x, a))(ax))
+    for dy in range(-4, 5):
+        for dx in range(-4, 5):
+            if (dx, dy) == (0, 0):
+                continue
+            yield ('translate(%d,%d)' % (dx, dy),
+                   (lambda a, b: lambda x: translate(x, a, b))(dx, dy))
+    for c1 in cols:
+        for c2 in range(10):
+            if c2 != c1:
+                yield ('recolor(%d->%d)' % (c1, c2),
+                       (lambda a, b: lambda x: recolor(x, a, b))(c1, c2))
+    yield ('crop', lambda x: crop_to_bbox(x))
+    for c in range(10):
+        yield ('fill_border(%d)' % c, (lambda cc: lambda x: fill_from_border(x, cc))(c))
+        yield ('fill_holes(%d)' % c, (lambda cc: lambda x: fill_holes(x, cc))(c))
+    for d in ('down', 'up', 'left', 'right'):
+        yield ('gravity_' + d, (lambda dd: lambda x: gravity(x, dd))(d))
+    for ax in ('h', 'v'):
+        yield ('mirror_' + ax, (lambda a: lambda x: mirror_union(x, a))(ax))
+    yield ('connect', lambda x: connect_points(x))
+    yield ('connect_diag', lambda x: connect_diag(x))
+    yield ('dilate', lambda x: dilate(x))
+    for key in ('largest', 'smallest'):
+        yield ('crop_' + key, (lambda kk: lambda x: crop_component(x, kk))(key))
+    for c in cols:
+        if c != bg:
+            yield ('keep_color(%d)' % c, (lambda cc: lambda x: keep_color(x, cc))(c))
+    for key in ('largest', 'smallest'):
+        yield ('remove_' + key, (lambda kk: lambda x: remove_component(x, kk))(key))
 
 
-def _enumerate_depth2(in0, out0):
-    # "extract the object, then transform it": crop to the non-background bbox or
-    # a single object, then apply any depth-1 primitive to the extracted object.
-    for pname, pre in _PRE.items():
-        obj = pre(in0)
-        for name, prog in _enumerate_depth1(obj, out0):
-            yield (pname + '->' + name, lambda g, p=prog, q=pre: p(q(g)))
+def _compose(outer, inner):
+    return lambda g: outer(inner(g))
 
 
-def find_program(train):
-    """Return a program function consistent with all training examples, or None."""
+def _verify(prog, train):
+    return all(_tup(prog(t['input'])) == _tup(t['output']) for t in train)
+
+
+def _size_compatible(g, out0):
+    """Can g reach out0's dimensions in one primitive (equal, or g tiles/scales
+    up to out0, or g self-substitutes into out0)?"""
+    h, w = len(g), len(g[0])
+    H, W = len(out0), len(out0[0])
+    if (h, w) == (H, W):
+        return True
+    if H % h == 0 and W % w == 0:
+        return True  # tile / scale / self-substitute all imply divisibility
+    return False
+
+
+def _closeness(g, out0):
+    """Hamming distance to the target when top-left aligned and padded, plus a
+    penalty for area mismatch.  Lower is closer; used only to order the beam."""
+    H, W = len(out0), len(out0[0])
+    h, w = len(g), len(g[0])
+    if h > H or w > W:
+        return h * w + 1_000_000
+    mism = 0
+    for r in range(h):
+        for c in range(w):
+            if g[r][c] != out0[r][c]:
+                mism += 1
+    mism += (H - h) * W + H * (W - w)
+    return mism
+
+
+def find_program(train, max_depth=2, beam=16):
+    """Program search over depth-1..3 compositions.
+
+    Depth-1 and the *final* step of every composition are target-matched, so
+    size-changing primitives (scale, tile, self-substitution) stay reachable.
+    Intermediate steps are the size-preserving/shrinking primitives above, dedup'd
+    by the intermediate grid they produce.  Depth-3 expands only the `beam`
+    closest intermediate grids (a search heuristic — the winner is still verified
+    against every training example, so pruning can only miss, never mis-answer)."""
     in0, out0 = train[0]['input'], train[0]['output']
-    seen = set()
-    for name, prog in list(_enumerate_depth1(in0, out0)) + list(_enumerate_depth2(in0, out0)):
-        if name in seen:
-            continue
-        seen.add(name)
-        if all(_tup(prog(t['input'])) == _tup(t['output']) for t in train):
+    H, W = len(out0), len(out0[0])
+
+    # depth 1
+    for name, prog in _enumerate_depth1(in0, out0):
+        if _verify(prog, train):
             return prog
+
+    # depth 2: f1 (unconditional) then f2 (target-matched)
+    g1_list = []  # (closeness, f1) for the beam that feeds depth 3
+    if max_depth < 2:
+        return None
+    seen_g1 = set()
+    for f1name, f1 in _unconditional_transitions(in0):
+        g1 = f1(in0)
+        k1 = _tup(g1)
+        if k1 in seen_g1:
+            continue
+        seen_g1.add(k1)
+        g1_list.append((_closeness(g1, out0), f1))
+        if not _size_compatible(g1, out0):
+            continue
+        for f2name, f2 in _enumerate_depth1(g1, out0):
+            prog = _compose(f2, f1)
+            if _verify(prog, train):
+                return prog
+
+    # depth 3: f1 then f2 then f3, from the beam of closest g1
+    if max_depth >= 3:
+        g1_list.sort(key=lambda t: t[0])
+        seen_g2 = set()  # global dedup: many (f1, f2) pairs reach the same grid
+        for _, f1 in g1_list[:beam]:
+            g1 = f1(in0)
+            for f2name, f2 in _unconditional_transitions(g1):
+                g2 = f2(g1)
+                if len(g2) > H or len(g2[0]) > W:
+                    continue
+                k2 = _tup(g2)
+                if k2 in seen_g2:
+                    continue
+                seen_g2.add(k2)
+                # cheap pre-filters before the expensive target-matched enumeration
+                if len(_colors(g2) ^ _colors(out0)) > 3:
+                    continue
+                if not _size_compatible(g2, out0):
+                    continue
+                for f3name, f3 in _enumerate_depth1(g2, out0, fast=True):
+                    prog = _compose(f3, _compose(f2, f1))
+                    if _verify(prog, train):
+                        return prog
     return None
 
 
-def solve_task(task):
-    prog = find_program(task['train'])
+def solve_task(task, max_depth=2, beam=16):
+    prog = find_program(task['train'], max_depth=max_depth, beam=beam)
     if prog is None:
         return None
     return [prog(t['input']) for t in task['test']]

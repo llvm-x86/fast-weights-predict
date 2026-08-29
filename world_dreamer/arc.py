@@ -317,6 +317,31 @@ def connect_points(g):
     return out
 
 
+def connect_newcolor(g, L):
+    """Draw straight lines of color L between same-colored points that share a
+    row or column (the 'draw with a *new* color' variant of connect_points)."""
+    bg = _bg(g)
+    h, w = len(g), len(g[0])
+    out = [list(row) for row in g]
+    rows = defaultdict(list)
+    cols = defaultdict(list)
+    for r in range(h):
+        for c in range(w):
+            v = g[r][c]
+            if v != bg:
+                rows[(v, r)].append(c)
+                cols[(v, c)].append(r)
+    for (v, r), cs in rows.items():
+        if len(cs) >= 2:
+            for c in range(min(cs) + 1, max(cs)):
+                out[r][c] = L
+    for (v, c), rs in cols.items():
+        if len(rs) >= 2:
+            for r in range(min(rs) + 1, max(rs)):
+                out[r][c] = L
+    return out
+
+
 def connect_diag(g):
     """For a color with exactly two cells that are NOT aligned, draw the diagonal
     (Bresenham) line between them."""
@@ -723,6 +748,43 @@ def fill_uniform_cols(g, c):
     return out
 
 
+def crop_topleft(g, H, W):
+    """Crop to the top-left H x W corner (the 'extract the fundamental unit in the
+    top-left corner' family)."""
+    return [row[:W] for row in g[:H]]
+
+
+def tile_2d(g, H, W):
+    """Detect the smallest 2-D repeating unit (row period x column period) and
+    tile it to H x W — the 2-D analog of extend_rows / extend_cols."""
+    h, w = len(g), len(g[0])
+    ph = _period_of([tuple(r) for r in g])
+    cols = [tuple(g[r][c] for r in range(h)) for c in range(w)]
+    pw = _period_of(cols)
+    return [[g[r % ph][c % pw] for c in range(W)] for r in range(H)]
+
+
+def _count_components(g):
+    return len(_components(g, _bg(g)))
+
+
+def count_row(g, color):
+    """Count connected components -> a 1 x N row of `color` cells (numerosity)."""
+    return [[color] * _count_components(g)]
+
+
+def count_col(g, color):
+    """Count connected components -> an N x 1 column of `color` cells."""
+    return [[color] for _ in range(_count_components(g))]
+
+
+def count_diag(g, color):
+    """Count connected components -> an N x N grid with `color` on the main
+    diagonal."""
+    n = _count_components(g)
+    return [[color if i == j else 0 for j in range(n)] for i in range(n)]
+
+
 # ---------------------------------------------------------------- program search
 
 # A "program" is a closed-over function grid -> grid.  Search enumerates programs
@@ -873,6 +935,13 @@ def _enumerate_depth1(in0, out0, fast=False):
         if _tup(connect_diag(in0)) == target:
             yield ('connect_diag', lambda g: connect_diag(g))
 
+    # connect same-colored points with a *new* color (adds a color: cdiff <= 1)
+    if (h, w) == (H, W) and cdiff <= 1:
+        for L in _colors(out0) - cols:
+            if _tup(connect_newcolor(in0, L)) == target:
+                yield ('connect_newcolor(%d)' % L,
+                       (lambda cc: lambda g: connect_newcolor(g, cc))(L))
+
     # dilation (size-preserving) — color-preserving
     if (h, w) == (H, W) and cdiff == 0:
         if _tup(dilate(in0)) == target:
@@ -969,6 +1038,25 @@ def _enumerate_depth1(in0, out0, fast=False):
             if _tup(fill_uniform_cols(in0, c)) == target:
                 yield ('fill_uniform_cols(%d)' % c,
                        (lambda cc: lambda g: fill_uniform_cols(g, cc))(c))
+
+    # crop to the top-left corner at output size
+    if H <= h and W <= w and (H, W) != (h, w) and _tup(crop_topleft(in0, H, W)) == target:
+        yield ('crop_topleft', (lambda hh, ww: lambda g: crop_topleft(g, hh, ww))(H, W))
+
+    # 2-D period tiling to output size (grows or shrinks)
+    if _tup(tile_2d(in0, H, W)) == target:
+        yield ('tile_2d', (lambda hh, ww: lambda g: tile_2d(g, hh, ww))(H, W))
+
+    # numerosity: count components -> a row / column / diagonal of cells
+    for color in _colors(out0):
+        if color == bg and len(_colors(out0)) > 1:
+            continue
+        if _tup(count_row(in0, color)) == target:
+            yield ('count_row(%d)' % color, (lambda cc: lambda g: count_row(g, cc))(color))
+        if _tup(count_col(in0, color)) == target:
+            yield ('count_col(%d)' % color, (lambda cc: lambda g: count_col(g, cc))(color))
+        if _tup(count_diag(in0, color)) == target:
+            yield ('count_diag(%d)' % color, (lambda cc: lambda g: count_diag(g, cc))(color))
 
 
 def _unconditional_transitions(g):

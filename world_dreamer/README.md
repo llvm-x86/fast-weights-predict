@@ -56,7 +56,11 @@ primitive library covers two kinds of transformation:
   onto one), border painting, dominant-color flood, symmetry-axis completion
   about a detected (half-integer) axis, and structure extraction/erasure: keep or
   erase the central row / column / cross / diagonals, checkerboard-by-parity from
-  the background hole, and highlight monochromatic rows/columns.
+  the background hole, and highlight monochromatic rows/columns;
+- **numerosity + unit extraction** (v5) — count connected components into a
+  row / column / diagonal of cells, crop the top-left corner to output size,
+  2-D periodic tiling, and drawing a line between same-colored points with a
+  *new* color.
 
 The dreamer is a **program-composition search**: depth-1 primitives, plus
 depth-2 and depth-3 compositions `f3 ∘ f2 ∘ f1` where intermediate steps are
@@ -70,8 +74,8 @@ processes (the tasks are pure Python, so the GIL rules out threads).
 
 | search depth | ARC-AGI-1 | ARC-AGI-2 |
 |---|---|---|
-| depth-1 | 38 / 400 (9.5%) | 40 / 1,000 (4.0%) |
-| depth-2 (default) | **48 / 400 (12.0%)** | **54 / 1,000 (5.4%)** |
+| depth-1 | 41 / 400 (10.2%) | 43 / 1,000 (4.3%) |
+| depth-2 (default) | **51 / 400 (12.8%)** | **58 / 1,000 (5.8%)** |
 
 ```bash
 python3 eval_arc.py /tmp/arc-agi/data/training 12 2     # ARC-AGI-1, depth 2 (default)
@@ -94,12 +98,12 @@ which is precisely where ARC's difficulty lies, and where the ARC-AGI-3 frontier
 
 No — not in the "solved" sense, and it would be misleading to claim otherwise.
 Measured on the ARC-AGI-2 public training set (1,000 tasks), the exact same
-pipeline scores **54 / 1,000 (5.4%)**, down from 12.0% on ARC-AGI-1. ARC-AGI-2 was
+pipeline scores **58 / 1,000 (5.8%)**, down from 12.8% on ARC-AGI-1. ARC-AGI-2 was
 designed to remove the single-transformation tasks this DSL catches and to stress
 compositional object/relation reasoning, so the number drops — exactly as
-expected. The per-object map transforms and v4 painting/structure primitives are
-aimed at that core and recover a handful of tasks, but the composition/relation
-core remains out of reach for a shallow hand-written DSL.
+expected. The per-object map transforms and v4/v5 painting/structure/numerosity
+primitives are aimed at that core and recover a handful of tasks, but the
+composition/relation core remains out of reach for a shallow hand-written DSL.
 
 What *does* generalize is the architecture, not the primitives: the same
 world-model-plus-dreamer recipe (predict, then plan inside the prediction) is

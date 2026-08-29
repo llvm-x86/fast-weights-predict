@@ -488,6 +488,241 @@ def extend_cols(g, W_target):
     return [[cols[c % p][r] for c in range(W_target)] for r in range(h)]
 
 
+# ---- v4: palette permutation, painting, symmetry-axis completion, structure
+# extraction.  These target the ARC families that plain single-color recolor and
+# central mirroring cannot reach: whole-palette relabeling, border/dominant-color
+# painting, completing a partially-drawn reflection about a *detected* (not
+# necessarily central) axis, and extracting the cross/diagonal through the grid
+# centre.
+
+def recolor_map(g, mapping):
+    """Relabel every cell by a global color->color map (a palette permutation).
+    Unmapped colors pass through unchanged."""
+    return [[mapping.get(v, v) for v in row] for row in g]
+
+
+def _infer_recolor_map(in0, out0):
+    """Learn a global input-color -> output-color map from one (in, out) pair.
+    Returns None if any input color maps to two different output colors."""
+    mapping = {}
+    for r in range(len(in0)):
+        for c in range(len(in0[0])):
+            a, b = in0[r][c], out0[r][c]
+            if a in mapping and mapping[a] != b:
+                return None
+            mapping[a] = b
+    return mapping or None
+
+
+def _infer_recolor_map_all(train):
+    """Learn a global input-color -> output-color *permutation* consistent across
+    all training pairs.  Returns None for size-changing tasks, identity maps,
+    non-bijective maps, or a pair where one input color maps to two outputs.
+
+    Bijectivity is the guard against the relational-relabel trap: a task where the
+    mapping differs per example (e.g. 'shape color -> corner color, corner -> 0')
+    can still produce a *single* consistent many-to-one map that fits every
+    example yet is wrong on the held-out test.  A true palette permutation is
+    injective, so two example-local maps can only agree if they really are one
+    fixed permutation of the palette."""
+    mapping = {}
+    for t in train:
+        inp, outp = t['input'], t['output']
+        if len(inp) != len(outp) or len(inp[0]) != len(outp[0]):
+            return None
+        for r in range(len(inp)):
+            for c in range(len(inp[0])):
+                a, b = inp[r][c], outp[r][c]
+                if a in mapping and mapping[a] != b:
+                    return None
+                mapping[a] = b
+    if not mapping:
+        return None
+    if all(mapping.get(k) == k for k in mapping):
+        return None  # identity — not a real recolor rule
+    if 0 in mapping and mapping[0] != 0:
+        return None  # a palette permutation leaves the background color alone
+    if len(set(mapping.values())) != len(mapping):
+        return None  # not a bijection — two colors collapse onto one
+    return mapping
+
+
+def draw_border(g, c):
+    """Paint the outer ring of cells (the border) color c."""
+    h, w = len(g), len(g[0])
+    out = [list(row) for row in g]
+    for r in range(h):
+        out[r][0] = c
+        out[r][w - 1] = c
+    for cc in range(w):
+        out[0][cc] = c
+        out[h - 1][cc] = c
+    return out
+
+
+def fill_most_common(g):
+    """Flood the whole grid with its most common color."""
+    cnt = Counter()
+    for row in g:
+        cnt.update(row)
+    mc = cnt.most_common(1)[0][0]
+    h, w = len(g), len(g[0])
+    return [[mc] * w for _ in range(h)]
+
+
+def reflect_complete(g, axis, pos):
+    """Complete a partially-drawn reflection about a *detected* axis.
+
+    axis 'v' mirrors across the horizontal line at row `pos` (top <-> bottom);
+    axis 'h' mirrors across the vertical line at column `pos` (left <-> right).
+    `pos` is a half-integer so the axis can lie between cells or through them.
+    Each background cell is filled from its reflected cell when the reflection is
+    non-background; the drawn side is never overwritten."""
+    bg = _bg(g)
+    h, w = len(g), len(g[0])
+    out = [list(row) for row in g]
+    if axis == 'v':
+        for r in range(h):
+            for c in range(w):
+                if out[r][c] == bg:
+                    rr = int(round(2 * pos - r))
+                    if 0 <= rr < h and g[rr][c] != bg:
+                        out[r][c] = g[rr][c]
+    elif axis == 'h':
+        for r in range(h):
+            for c in range(w):
+                if out[r][c] == bg:
+                    cc = int(round(2 * pos - c))
+                    if 0 <= cc < w and g[r][cc] != bg:
+                        out[r][c] = g[r][cc]
+    return out
+
+
+# Structure-extraction primitives treat 0 as the ARC background and every other
+# cell as 'ink'.  This is deliberate: these operations *erase* to 0, so they must
+# not fall back to the most-common color when a grid happens to contain no 0
+# (e.g. a fully-colored grid whose most-common color is an object, not the ground).
+
+def keep_cross(g):
+    """Keep only the non-zero cells in the central row or central column (the
+    plus/cross through the grid centre); everything else becomes 0."""
+    h, w = len(g), len(g[0])
+    cr, cc = h // 2, w // 2
+    out = [[0] * w for _ in range(h)]
+    for r in range(h):
+        for c in range(w):
+            if (r == cr or c == cc) and g[r][c] != 0:
+                out[r][c] = g[r][c]
+    return out
+
+
+def keep_diag(g, which='both'):
+    """Keep only the non-zero cells on the main ('main'), anti ('anti'), or both
+    ('both') diagonals through the grid centre."""
+    h, w = len(g), len(g[0])
+    out = [[0] * w for _ in range(h)]
+    for r in range(h):
+        for c in range(w):
+            if g[r][c] == 0:
+                continue
+            on_main = (r == c)
+            on_anti = (r + c == h - 1) or (r + c == w - 1)
+            if (which == 'main' and on_main) or (which == 'anti' and on_anti) \
+                    or (which == 'both' and (on_main or on_anti)):
+                out[r][c] = g[r][c]
+    return out
+
+
+def keep_mid_row(g):
+    """Keep only the central row (erase everything else to 0)."""
+    h, w = len(g), len(g[0])
+    cr = h // 2
+    return [[0] * w if r != cr else list(g[r]) for r in range(h)]
+
+
+def keep_mid_col(g):
+    """Keep only the central column (erase everything else to 0)."""
+    h, w = len(g), len(g[0])
+    cc = w // 2
+    return [[g[r][cc] if c == cc else 0 for c in range(w)] for r in range(h)]
+
+
+def remove_cross(g):
+    """Erase the central row and column (carve a plus of 0 through the grid)."""
+    h, w = len(g), len(g[0])
+    cr, cc = h // 2, w // 2
+    out = [list(row) for row in g]
+    for r in range(h):
+        out[r][cc] = 0
+    for c in range(w):
+        out[cr][c] = 0
+    return out
+
+
+def remove_diag(g, which='both'):
+    """Erase the main ('main'), anti ('anti'), or both ('both') diagonals (carve
+    an X of 0 through the grid)."""
+    h, w = len(g), len(g[0])
+    out = [list(row) for row in g]
+    for r in range(h):
+        for c in range(w):
+            on_main = (r == c)
+            on_anti = (r + c == h - 1) or (r + c == w - 1)
+            if (which == 'main' and on_main) or (which == 'anti' and on_anti) \
+                    or (which == 'both' and (on_main or on_anti)):
+                out[r][c] = 0
+    return out
+
+
+def checkerboard(g):
+    """Checkerboard by Manhattan-distance parity from the 0 'hole'.  The anchor is
+    the centroid of the 0 cells; cells at odd Manhattan distance from it become
+    the dominant ink color, even distance stay 0."""
+    h, w = len(g), len(g[0])
+    holes = []
+    cnt = Counter()
+    for r in range(h):
+        for c in range(w):
+            if g[r][c] == 0:
+                holes.append((r, c))
+            else:
+                cnt[g[r][c]] += 1
+    if not holes or not cnt:
+        return [list(row) for row in g]
+    color = cnt.most_common(1)[0][0]
+    ar = sum(r for r, _ in holes) // len(holes)
+    ac = sum(c for _, c in holes) // len(holes)
+    out = [[0] * w for _ in range(h)]
+    for r in range(h):
+        for c in range(w):
+            if (abs(r - ar) + abs(c - ac)) % 2 == 1:
+                out[r][c] = color
+    return out
+
+
+def fill_uniform_rows(g, c):
+    """Paint each monochromatic (single-color) row with color c; every other row
+    becomes 0 (the 'highlight uniform lines' family)."""
+    h, w = len(g), len(g[0])
+    out = [[0] * w for _ in range(h)]
+    for r in range(h):
+        if len(set(g[r])) == 1:
+            out[r] = [c] * w
+    return out
+
+
+def fill_uniform_cols(g, c):
+    """Paint each monochromatic column with color c; every other column becomes
+    0."""
+    h, w = len(g), len(g[0])
+    out = [[0] * w for _ in range(h)]
+    for cc in range(w):
+        if len(set(g[r][cc] for r in range(h))) == 1:
+            for r in range(h):
+                out[r][cc] = c
+    return out
+
+
 # ---------------------------------------------------------------- program search
 
 # A "program" is a closed-over function grid -> grid.  Search enumerates programs
@@ -678,6 +913,63 @@ def _enumerate_depth1(in0, out0, fast=False):
         if mapping and _tup(recolor_by_size(in0, mapping)) == target:
             yield ('recolor_by_size', (lambda m: lambda g: recolor_by_size(g, m))(mapping))
 
+    # global palette permutation (learned from in0 -> out0)
+    if (h, w) == (H, W):
+        mapping = _infer_recolor_map(in0, out0)
+        if mapping and len(mapping) > 1 and _tup(recolor_map(in0, mapping)) == target:
+            yield ('recolor_map', (lambda m: lambda g: recolor_map(g, m))(mapping))
+
+    # border painting (size-preserving)
+    if (h, w) == (H, W):
+        for c in range(10):
+            if _tup(draw_border(in0, c)) == target:
+                yield ('draw_border(%d)' % c, (lambda cc: lambda g: draw_border(g, cc))(c))
+
+    # dominant-color flood (size-preserving)
+    if (h, w) == (H, W) and _tup(fill_most_common(in0)) == target:
+        yield ('fill_most_common', lambda g: fill_most_common(g))
+
+    # symmetry-axis completion: reflect about a detected (half-integer) axis.
+    if (h, w) == (H, W) and cdiff == 0:
+        for ax, extent in (('v', h), ('h', w)):
+            for i in range(2 * extent + 1):
+                pos = i / 2.0
+                if _tup(reflect_complete(in0, ax, pos)) == target:
+                    yield ('reflect_%s(%.1f)' % (ax, pos),
+                           (lambda a, p: lambda g: reflect_complete(g, a, p))(ax, pos))
+
+    # structure extraction (cross / X through the centre, keep or erase); these
+    # erase to 0, which can add/remove the 0 color, so they are gated on size only.
+    if (h, w) == (H, W):
+        if _tup(keep_cross(in0)) == target:
+            yield ('keep_cross', lambda g: keep_cross(g))
+        for which in ('main', 'anti', 'both'):
+            if _tup(keep_diag(in0, which)) == target:
+                yield ('keep_diag_' + which,
+                       (lambda q: lambda g: keep_diag(g, q))(which))
+        if _tup(keep_mid_row(in0)) == target:
+            yield ('keep_mid_row', lambda g: keep_mid_row(g))
+        if _tup(keep_mid_col(in0)) == target:
+            yield ('keep_mid_col', lambda g: keep_mid_col(g))
+        if _tup(remove_cross(in0)) == target:
+            yield ('remove_cross', lambda g: remove_cross(g))
+        for which in ('main', 'anti', 'both'):
+            if _tup(remove_diag(in0, which)) == target:
+                yield ('remove_diag_' + which,
+                       (lambda q: lambda g: remove_diag(g, q))(which))
+        if _tup(checkerboard(in0)) == target:
+            yield ('checkerboard', lambda g: checkerboard(g))
+
+    # highlight uniform rows / columns (size-preserving)
+    if (h, w) == (H, W):
+        for c in range(10):
+            if _tup(fill_uniform_rows(in0, c)) == target:
+                yield ('fill_uniform_rows(%d)' % c,
+                       (lambda cc: lambda g: fill_uniform_rows(g, cc))(c))
+            if _tup(fill_uniform_cols(in0, c)) == target:
+                yield ('fill_uniform_cols(%d)' % c,
+                       (lambda cc: lambda g: fill_uniform_cols(g, cc))(c))
+
 
 def _unconditional_transitions(g):
     """Size-preserving or shrinking primitives, with bounded parameters, used as
@@ -723,6 +1015,27 @@ def _unconditional_transitions(g):
             yield ('keep_color(%d)' % c, (lambda cc: lambda x: keep_color(x, cc))(c))
     for key in ('largest', 'smallest'):
         yield ('remove_' + key, (lambda kk: lambda x: remove_component(x, kk))(key))
+    for c in range(10):
+        yield ('draw_border(%d)' % c, (lambda cc: lambda x: draw_border(x, cc))(c))
+    yield ('fill_most_common', lambda x: fill_most_common(x))
+    yield ('keep_cross', lambda x: keep_cross(x))
+    for which in ('main', 'anti', 'both'):
+        yield ('keep_diag_' + which, (lambda q: lambda x: keep_diag(x, q))(which))
+    yield ('keep_mid_row', lambda x: keep_mid_row(x))
+    yield ('keep_mid_col', lambda x: keep_mid_col(x))
+    yield ('remove_cross', lambda x: remove_cross(x))
+    for which in ('main', 'anti', 'both'):
+        yield ('remove_diag_' + which, (lambda q: lambda x: remove_diag(x, q))(which))
+    yield ('checkerboard', lambda x: checkerboard(x))
+    for c in range(10):
+        yield ('fill_uniform_rows(%d)' % c, (lambda cc: lambda x: fill_uniform_rows(x, cc))(c))
+        yield ('fill_uniform_cols(%d)' % c, (lambda cc: lambda x: fill_uniform_cols(x, cc))(c))
+    h, w = len(g), len(g[0])
+    for ax, extent in (('v', h), ('h', w)):
+        for i in range(2 * extent + 1):
+            pos = i / 2.0
+            yield ('reflect_%s(%.1f)' % (ax, pos),
+                   (lambda a, p: lambda x: reflect_complete(x, a, p))(ax, pos))
 
 
 def _compose(outer, inner):
@@ -780,6 +1093,12 @@ def find_program(train, max_depth=2, beam=16):
     for name, prog in _enumerate_depth1(in0, out0):
         if _verify(prog, train):
             return prog
+
+    # global palette permutation, learned across *all* examples (a single example
+    # cannot fix the whole map when different colors appear in different pairs).
+    mapping = _infer_recolor_map_all(train)
+    if mapping is not None:
+        return lambda g: recolor_map(g, mapping)
 
     # depth 2: f1 (unconditional) then f2 (target-matched)
     g1_list = []  # (closeness, f1) for the beam that feeds depth 3

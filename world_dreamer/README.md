@@ -58,9 +58,11 @@ primitive library covers two kinds of transformation:
   erase the central row / column / cross / diagonals, checkerboard-by-parity from
   the background hole, and highlight monochromatic rows/columns;
 - **numerosity + unit extraction** (v5) — count connected components into a
-  row / column / diagonal of cells, crop the top-left corner to output size,
-  2-D periodic tiling, and drawing a line between same-colored points with a
-  *new* color.
+  row / column / diagonal of cells, single-cell numerosity (least/most frequent
+  color, and the scattered 'noise' color: least frequent, ties → most
+  components), crop the top-left corner to output size, 2-D periodic tiling, and
+  drawing a line between same-colored points with a *new* color (filling only
+  background cells, so intermediate same-colored points are preserved).
 
 The dreamer is a **program-composition search**: depth-1 primitives, plus
 depth-2 and depth-3 compositions `f3 ∘ f2 ∘ f1` where intermediate steps are
@@ -74,8 +76,8 @@ processes (the tasks are pure Python, so the GIL rules out threads).
 
 | search depth | ARC-AGI-1 | ARC-AGI-2 |
 |---|---|---|
-| depth-1 | 41 / 400 (10.2%) | 43 / 1,000 (4.3%) |
-| depth-2 (default) | **51 / 400 (12.8%)** | **58 / 1,000 (5.8%)** |
+| depth-1 | 43 / 400 (10.8%) | 46 / 1,000 (4.6%) |
+| depth-2 (default) | **53 / 400 (13.2%)** | **60 / 1,000 (6.0%)** |
 
 ```bash
 python3 eval_arc.py /tmp/arc-agi/data/training 12 2     # ARC-AGI-1, depth 2 (default)
@@ -98,7 +100,7 @@ which is precisely where ARC's difficulty lies, and where the ARC-AGI-3 frontier
 
 No — not in the "solved" sense, and it would be misleading to claim otherwise.
 Measured on the ARC-AGI-2 public training set (1,000 tasks), the exact same
-pipeline scores **58 / 1,000 (5.8%)**, down from 12.8% on ARC-AGI-1. ARC-AGI-2 was
+pipeline scores **60 / 1,000 (6.0%)**, down from 13.2% on ARC-AGI-1. ARC-AGI-2 was
 designed to remove the single-transformation tasks this DSL catches and to stress
 compositional object/relation reasoning, so the number drops — exactly as
 expected. The per-object map transforms and v4/v5 painting/structure/numerosity
@@ -162,8 +164,8 @@ verifies. Measured as a union on the held-out test:
 
 | benchmark | DSL alone | learned alone | **combined** |
 |---|---|---|---|
-| ARC-AGI-1 | 51 / 400 (12.8%) | 4 / 129 (3.1%) | **54 / 400 (13.5%)** |
-| ARC-AGI-2 | 58 / 1,000 (5.8%) | 2 / 257 (0.8%) | **59 / 1,000 (5.9%)** |
+| ARC-AGI-1 | 53 / 400 (13.2%) | 4 / 129 (3.1%) | **56 / 400 (14.0%)** |
+| ARC-AGI-2 | 60 / 1,000 (6.0%) | 2 / 257 (0.8%) | **61 / 1,000 (6.1%)** |
 
 The same point holds when the dreamer is *automated*: `verify_solution.py` runs a
 language-model proposer (a solver agent per task) against the verifier. On an

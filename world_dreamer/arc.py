@@ -334,11 +334,13 @@ def connect_newcolor(g, L):
     for (v, r), cs in rows.items():
         if len(cs) >= 2:
             for c in range(min(cs) + 1, max(cs)):
-                out[r][c] = L
+                if out[r][c] == bg:
+                    out[r][c] = L
     for (v, c), rs in cols.items():
         if len(rs) >= 2:
             for r in range(min(rs) + 1, max(rs)):
-                out[r][c] = L
+                if out[r][c] == bg:
+                    out[r][c] = L
     return out
 
 
@@ -785,6 +787,59 @@ def count_diag(g, color):
     return [[color if i == j else 0 for j in range(n)] for i in range(n)]
 
 
+def _component_color_counts(g):
+    """Number of 4-connected components per color."""
+    cnt = Counter()
+    for color, cells in _components(g, _bg(g)):
+        cnt[color] += 1
+    return cnt
+
+
+def noise_color(g):
+    """1x1 grid of the 'noise' color in a two-color grid: the least frequent
+    non-background color, with ties broken toward the color that forms *more*
+    separate connected components (the scattered one rather than the solid
+    block)."""
+    bg = _bg(g)
+    cnt = Counter()
+    for row in g:
+        cnt.update(row)
+    if bg in cnt:
+        del cnt[bg]
+    if not cnt:
+        return [[0]]
+    comps = _component_color_counts(g)
+    def key(color):
+        return (cnt[color], -comps.get(color, 0))
+    return [[min(cnt, key=key)]]
+
+
+def least_common_color(g):
+    """1x1 grid of the least frequent non-background color."""
+    bg = _bg(g)
+    cnt = Counter()
+    for row in g:
+        cnt.update(row)
+    if bg in cnt:
+        del cnt[bg]
+    if not cnt:
+        return [[0]]
+    return [[min(cnt.items(), key=lambda kv: (kv[1], kv[0]))[0]]]
+
+
+def most_common_color(g):
+    """1x1 grid of the most frequent non-background color."""
+    bg = _bg(g)
+    cnt = Counter()
+    for row in g:
+        cnt.update(row)
+    if bg in cnt:
+        del cnt[bg]
+    if not cnt:
+        return [[0]]
+    return [[max(cnt.items(), key=lambda kv: (kv[1], kv[0]))[0]]]
+
+
 # ---------------------------------------------------------------- program search
 
 # A "program" is a closed-over function grid -> grid.  Search enumerates programs
@@ -956,6 +1011,18 @@ def _enumerate_depth1(in0, out0, fast=False):
             if _tup(map_rotate(in0, k)) == target:
                 yield ('map_rotate%d' % (90 * k), (lambda kk: lambda g: map_rotate(g, kk))(k))
 
+    # single-cell numerosity: output the least/most frequent color, or the
+    # scattered 'noise' color (least frequent, ties -> more components).  Tried
+    # before the crop rules because, for a 1x1 output, 'count/identify a color' is
+    # the honest rule and 'crop to a single cell' is a degenerate one.
+    if (H, W) == (1, 1):
+        if _tup(noise_color(in0)) == target:
+            yield ('noise_color', lambda g: noise_color(g))
+        if _tup(least_common_color(in0)) == target:
+            yield ('least_common_color', lambda g: least_common_color(g))
+        if _tup(most_common_color(in0)) == target:
+            yield ('most_common_color', lambda g: most_common_color(g))
+
     # crop to a single object (largest / smallest)
     for key in ('largest', 'smallest'):
         co = crop_component(in0, key)
@@ -1039,12 +1106,16 @@ def _enumerate_depth1(in0, out0, fast=False):
                 yield ('fill_uniform_cols(%d)' % c,
                        (lambda cc: lambda g: fill_uniform_cols(g, cc))(c))
 
-    # crop to the top-left corner at output size
-    if H <= h and W <= w and (H, W) != (h, w) and _tup(crop_topleft(in0, H, W)) == target:
+    # crop to the top-left corner at output size.  A 1x1 crop is just 'return the
+    # corner cell', a degenerate rule that spuriously fits single-cell-output
+    # tasks, so it is excluded; the single-cell numerosity primitives below are the
+    # honest 1x1 family.
+    if H <= h and W <= w and (H, W) != (h, w) and (H, W) != (1, 1) \
+            and _tup(crop_topleft(in0, H, W)) == target:
         yield ('crop_topleft', (lambda hh, ww: lambda g: crop_topleft(g, hh, ww))(H, W))
 
-    # 2-D period tiling to output size (grows or shrinks)
-    if _tup(tile_2d(in0, H, W)) == target:
+    # 2-D period tiling to output size (grows or shrinks, but not a 1x1 crop)
+    if (H, W) != (1, 1) and _tup(tile_2d(in0, H, W)) == target:
         yield ('tile_2d', (lambda hh, ww: lambda g: tile_2d(g, hh, ww))(H, W))
 
     # numerosity: count components -> a row / column / diagonal of cells
@@ -1057,6 +1128,8 @@ def _enumerate_depth1(in0, out0, fast=False):
             yield ('count_col(%d)' % color, (lambda cc: lambda g: count_col(g, cc))(color))
         if _tup(count_diag(in0, color)) == target:
             yield ('count_diag(%d)' % color, (lambda cc: lambda g: count_diag(g, cc))(color))
+
+    # (single-cell numerosity is tried earlier, before the degenerate crop rules)
 
 
 def _unconditional_transitions(g):
@@ -1118,12 +1191,11 @@ def _unconditional_transitions(g):
     for c in range(10):
         yield ('fill_uniform_rows(%d)' % c, (lambda cc: lambda x: fill_uniform_rows(x, cc))(c))
         yield ('fill_uniform_cols(%d)' % c, (lambda cc: lambda x: fill_uniform_cols(x, cc))(c))
-    h, w = len(g), len(g[0])
-    for ax, extent in (('v', h), ('h', w)):
-        for i in range(2 * extent + 1):
-            pos = i / 2.0
-            yield ('reflect_%s(%.1f)' % (ax, pos),
-                   (lambda a, p: lambda x: reflect_complete(x, a, p))(ax, pos))
+    # reflect_complete is deliberately NOT an intermediate step: its half-integer
+    # axis scan is high-cardinality (~2*size candidates) and, being a *completion*
+    # operation, it belongs as the final, target-matched step rather than a
+    # size-preserving intermediate.  Keeping it out of the intermediate set is what
+    # keeps depth-3 search feasible.
 
 
 def _compose(outer, inner):

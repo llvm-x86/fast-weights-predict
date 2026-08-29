@@ -113,6 +113,28 @@ by the planner, and that the route to high ARC scores is synthesis, not more
 hand-coded primitives. It is also *not* a 90% system: it is manual induction on a
 handful of tasks, not an automated solver.
 
+### The learned (non-LLM) substrate — `learned.py`
+
+The literal dragon-hatchling: the BDH fast-weight memory applied directly to ARC
+grids. Features are position-dependent one-hot cell colors; the write is the
+Hebbian outer product `W ← W + η ψ(output) φ(input)ᵀ`; the readout is the linear
+map plus an argmax color per cell (computed without materializing the dense
+matrix). This is a world model with a *trivial* readout — there is no planner.
+
+Measured honestly on the same-size subset (size-changing tasks are reported as
+skipped, not hidden):
+
+| benchmark | same-size tasks | solved |
+|---|---|---|
+| ARC-AGI-1 | 129 | **0** |
+| ARC-AGI-2 | 257 | **0** |
+
+That 0% is the finding, not a failure of the harness: an associative memory can
+only retrieve an output whose input overlaps the stored inputs, and ARC requires
+induction of a compositional rule. It confirms what the framework states — the
+power of the world-dreamer is in the planner, and a linear Hebbian substrate does
+not carry from pursuit to ARC.
+
 The same point holds when the dreamer is *automated*: `verify_solution.py` runs a
 language-model proposer (a solver agent per task) against the verifier. On an
 unbiased 8-task sample of ARC-AGI-2 tasks the primitive DSL scores 0/8 on, a
@@ -142,3 +164,5 @@ fast-weight matrix.
 - `arc.py` — the discrete instantiation (program induction + program search).
 - `eval_arc.py` — ARC evaluation harness (parallel, 12 processes).
 - `llm_dreamer.py` — the LLM-as-dreamer demonstration (induced, verified rules).
+- `learned.py` — the non-LLM learned fast-weight substrate (BDH on ARC grids).
+- `verify_solution.py` — verifies a proposed `solve()` against an ARC task.

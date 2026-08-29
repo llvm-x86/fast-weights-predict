@@ -108,12 +108,14 @@ primitives are aimed at that core and recover a handful of tasks, but the
 composition/relation core remains out of reach for a shallow hand-written DSL.
 
 **On the held-out *evaluation* sets (the real benchmarks) the combined system
-scores 8 / 400 (2.0%) on ARC-AGI-1 and 0 / 120 (0.0%) on ARC-AGI-2.** These are
-the numbers that answer the "does it generalize" question, and the answer is:
-barely on ARC-AGI-1 and not at all on ARC-AGI-2. The training-set figures above
-are optimistic by roughly an order of magnitude — they cover the
-single-transformation and short-composition tasks that the evaluation sets were
-explicitly built to exclude. The evaluation tasks are larger, more colorful, and
+scores 8 / 400 (2.0%) on ARC-AGI-1 and 0 / 120 (0.0%) on ARC-AGI-2.** The 8
+ARC-AGI-1 solves come entirely from the hand-written DSL; the learned patch
+memory contributes **zero** to either evaluation set. These are the numbers that
+answer the "does it generalize" question, and the answer is: barely on ARC-AGI-1
+and not at all on ARC-AGI-2. The training-set figures above are optimistic by
+roughly an order of magnitude — they cover the single-transformation and
+short-composition tasks that the evaluation sets were explicitly built to
+exclude. The evaluation tasks are larger, more colorful, and
 compositional/relational, and neither the hand-written DSL nor the patch
 associative memory induces them. Any claim that this repository "solves ARC-AGI-1
 or ARC-AGI-2" would be false.

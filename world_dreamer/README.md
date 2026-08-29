@@ -133,22 +133,37 @@ Hebbian outer product `W ← W + η ψ(output) φ(input)ᵀ`; the readout is the
 map plus an argmax color per cell (computed without materializing the dense
 matrix).
 
-Two fast-weight world models are learned — a position-bound map and a
-position-invariant color map — and the *dreamer* selects the one that generalizes
-best by leave-one-out error on the training set (so a model that merely memorizes
-is rejected). Measured honestly on the same-size subset (size-changing tasks are
-reported as skipped, not hidden):
+Three fast-weight world models are learned — a position-bound map, a
+position-invariant color map, and (v2) a **3×3 patch associative memory**
+(`LocalRuleModel`) that keys on the local input neighborhood instead of a single
+cell, so a rule learned at one location generalizes to every location — and the
+*dreamer* selects the one that generalizes best by leave-one-out error on the
+training set (so a model that merely memorizes is rejected). Measured honestly on
+the same-size subset (size-changing tasks are reported as skipped, not hidden):
 
 | benchmark | same-size tasks | solved |
 |---|---|---|
-| ARC-AGI-1 | 129 | **1 (0.8%)** |
-| ARC-AGI-2 | 257 | **1 (0.4%)** |
+| ARC-AGI-1 | 129 | **4 (3.1%)** |
+| ARC-AGI-2 | 257 | **2 (0.8%)** |
 
-That near-zero is the finding, not a failure of the harness: an associative
-memory can only retrieve an output whose input overlaps the stored inputs (or a
-global color map), and ARC requires induction of a compositional rule. It
-confirms what the framework states — the power of the world-dreamer is in the
-planner, and a linear Hebbian substrate does not carry from pursuit to ARC.
+The patch memory is what lifts the number: it expresses the *local* ARC family
+(cellular automata, region fill, symmetry completion) that neither the
+position-bound map nor the global color map can reach, recovering three tasks the
+symbolic DSL also misses (`3618c87e`, `543a7ed5`, `b6afb2da`). It is still single
+digits, and that is the honest point: an associative memory — even a patch-level
+one — cannot induce the compositional relational rules that are most of ARC.
+
+### The combined substrate — `combined.py`
+
+The two non-LLM substrates solve *disjoint* slices, so the honest realization of
+"proceed with A & B in parallel" is an ensemble: try the induced program first
+(exact and verified), and fall back to the learned patch map when no program
+verifies. Measured as a union on the held-out test:
+
+| benchmark | DSL alone | learned alone | **combined** |
+|---|---|---|---|
+| ARC-AGI-1 | 51 / 400 (12.8%) | 4 / 129 (3.1%) | **54 / 400 (13.5%)** |
+| ARC-AGI-2 | 58 / 1,000 (5.8%) | 2 / 257 (0.8%) | **59 / 1,000 (5.9%)** |
 
 The same point holds when the dreamer is *automated*: `verify_solution.py` runs a
 language-model proposer (a solver agent per task) against the verifier. On an
@@ -180,4 +195,5 @@ fast-weight matrix.
 - `eval_arc.py` — ARC evaluation harness (parallel, 12 processes).
 - `llm_dreamer.py` — the LLM-as-dreamer demonstration (induced, verified rules).
 - `learned.py` — the non-LLM learned fast-weight substrate (BDH on ARC grids).
+- `combined.py` — the faithful ensemble: induced program first, learned patch map fallback.
 - `verify_solution.py` — verifies a proposed `solve()` against an ARC task.

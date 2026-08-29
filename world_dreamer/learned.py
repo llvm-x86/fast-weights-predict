@@ -95,6 +95,61 @@ class ColorRemapModel:
                  for j in range(self.W)] for i in range(self.H)]
 
 
+class LocalRuleModel:
+    """Associative memory over 3x3 *input neighborhoods* -> output cell color.
+
+    This is the patch-level generalization of the Hebbian map: instead of keying
+    on (position, color), it keys on the local 3x3 pattern, so a rule learned at
+    one location generalizes to every other location.  It expresses the *local*
+    ARC family (cellular automata, hole/region fill, dilation, symmetry
+    completion) that neither the position-bound map nor the global color map can.
+    Exact neighborhood matches vote; an unseen neighborhood falls back to the
+    nearest stored pattern by Hamming distance, then to identity."""
+
+    def __init__(self, H, W):
+        self.H, self.W = H, W
+        self.dict = {}  # 9-tuple neighborhood -> per-color counts
+
+    def _key(self, x, i, j):
+        k = []
+        for di in (-1, 0, 1):
+            for dj in (-1, 0, 1):
+                ni, nj = i + di, j + dj
+                k.append(x[ni][nj] if 0 <= ni < self.H and 0 <= nj < self.W else -1)
+        return tuple(k)
+
+    def observe(self, x, y):
+        for i in range(self.H):
+            for j in range(self.W):
+                k = self._key(x, i, j)
+                d = self.dict.get(k)
+                if d is None:
+                    d = [0] * 10
+                    self.dict[k] = d
+                d[y[i][j]] += 1
+
+    def predict(self, x):
+        out = [[0] * self.W for _ in range(self.H)]
+        keys = list(self.dict.keys())
+        for i in range(self.H):
+            for j in range(self.W):
+                k = self._key(x, i, j)
+                d = self.dict.get(k)
+                if d is None:
+                    best, bestd = None, 10 ** 9
+                    for kk in keys:
+                        dist = sum(1 for a, b in zip(k, kk) if a != b)
+                        if dist < bestd:
+                            bestd, best = dist, kk
+                    if best is not None:
+                        d = self.dict[best]
+                    else:
+                        out[i][j] = x[i][j]
+                        continue
+                out[i][j] = max(range(10), key=lambda c: d[c])
+        return out
+
+
 def _mismatch(model, e):
     p = model.predict(e['input'])
     return sum(1 for i in range(len(p)) for j in range(len(p[0]))
@@ -104,6 +159,8 @@ def _mismatch(model, e):
 def _make(cls, H, W, eta, decay):
     if cls is HebbianWorldModel:
         return HebbianWorldModel(H, W, eta=eta, decay=decay)
+    if cls is LocalRuleModel:
+        return LocalRuleModel(H, W)
     return ColorRemapModel(H, W)
 
 
@@ -135,7 +192,7 @@ def solve_task(task, eta=1.0, decay=0.0):
             return None
         if (len(e['output']), len(e['output'][0])) != (H, W):
             return None
-    best_cls = min([HebbianWorldModel, ColorRemapModel],
+    best_cls = min([HebbianWorldModel, ColorRemapModel, LocalRuleModel],
                    key=lambda cls: _loo_error(cls, train, H, W, eta, decay))
     m = _make(best_cls, H, W, eta, decay)
     for e in train:

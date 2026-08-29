@@ -464,6 +464,30 @@ def map_rotate(g, k):
     return out
 
 
+def _period_of(seq):
+    n = len(seq)
+    for p in range(1, n + 1):
+        if all(seq[i] == seq[i % p] for i in range(n)):
+            return p
+    return n
+
+
+def extend_rows(g, H_target):
+    """Continue the vertical repeating row pattern to H_target rows (the
+    sequence-extrapolation family)."""
+    rows = [tuple(r) for r in g]
+    p = _period_of(rows)
+    return [list(rows[i % p]) for i in range(H_target)]
+
+
+def extend_cols(g, W_target):
+    """Continue the horizontal repeating column pattern to W_target columns."""
+    h = len(g)
+    cols = [tuple(g[r][c] for r in range(h)) for c in range(len(g[0]))]
+    p = _period_of(cols)
+    return [[cols[c % p][r] for c in range(W_target)] for r in range(h)]
+
+
 # ---------------------------------------------------------------- program search
 
 # A "program" is a closed-over function grid -> grid.  Search enumerates programs
@@ -575,6 +599,12 @@ def _enumerate_depth1(in0, out0, fast=False):
     if H == h * h and W == w * w:
         if _tup(self_substitute(in0)) == target:
             yield ('self_substitute', lambda g: self_substitute(g))
+
+    # sequence extrapolation: continue the repeating row/column pattern
+    if w == W and _tup(extend_rows(in0, H)) == target:
+        yield ('extend_rows', lambda g: extend_rows(g, H))
+    if h == H and _tup(extend_cols(in0, W)) == target:
+        yield ('extend_cols', lambda g: extend_cols(g, W))
 
     # crop to bounding box of non-background
     cr = crop_to_bbox(in0)
@@ -704,14 +734,17 @@ def _verify(prog, train):
 
 
 def _size_compatible(g, out0):
-    """Can g reach out0's dimensions in one primitive (equal, or g tiles/scales
-    up to out0, or g self-substitutes into out0)?"""
+    """Can g reach out0's dimensions in one primitive?"""
     h, w = len(g), len(g[0])
     H, W = len(out0), len(out0[0])
     if (h, w) == (H, W):
         return True
     if H % h == 0 and W % w == 0:
-        return True  # tile / scale / self-substitute all imply divisibility
+        return True  # tile / scale / self-substitute imply divisibility
+    if w == W:
+        return True  # extend_rows: any height, width fixed
+    if h == H:
+        return True  # extend_cols: any width, height fixed
     return False
 
 

@@ -74,12 +74,60 @@ class HebbianWorldModel:
         return out
 
 
+class ColorRemapModel:
+    """Hebbian color association: co-occurrence C[in_color][out_color], learned
+    across every cell of every training pair, ignoring position.  This expresses
+    global recolors (the most common single ARC transform) that the position-bound
+    map cannot."""
+
+    def __init__(self, H, W):
+        self.H, self.W = H, W
+        self.C = [[0] * 10 for _ in range(10)]
+
+    def observe(self, x, y):
+        for i in range(self.H):
+            for j in range(self.W):
+                self.C[x[i][j]][y[i][j]] += 1
+
+    def predict(self, x):
+        C = self.C
+        return [[max(range(10), key=lambda c: C[x[i][j]][c])
+                 for j in range(self.W)] for i in range(self.H)]
+
+
+def _mismatch(model, e):
+    p = model.predict(e['input'])
+    return sum(1 for i in range(len(p)) for j in range(len(p[0]))
+               if p[i][j] != e['output'][i][j])
+
+
+def _make(cls, H, W, eta, decay):
+    if cls is HebbianWorldModel:
+        return HebbianWorldModel(H, W, eta=eta, decay=decay)
+    return ColorRemapModel(H, W)
+
+
+def _loo_error(cls, train, H, W, eta, decay):
+    """Leave-one-out generalization error of a world model on the training set:
+    for each example, train on the others and score the held-out one.  This is the
+    dreamer's honest check — a model that only memorizes is rejected even when it
+    fits the training set perfectly."""
+    err = 0
+    for k in range(len(train)):
+        m = _make(cls, H, W, eta, decay)
+        for j, e in enumerate(train):
+            if j != k:
+                m.observe(e['input'], e['output'])
+        err += _mismatch(m, train[k])
+    return err
+
+
 def solve_task(task, eta=1.0, decay=0.0):
-    """Learn W from the training pairs and predict every test output.
+    """Learn candidate fast-weight world models and let the dreamer pick the one
+    that generalizes best (lowest leave-one-out error), then apply it to the test.
 
     Returns None for tasks whose grids change size (the fixed-geometry linear map
-    cannot express a size change); those are counted separately, not as failures
-    to be hidden."""
+    cannot express a size change); those are counted separately, not hidden."""
     train = task['train']
     H, W = len(train[0]['output']), len(train[0]['output'][0])
     for e in train + task['test']:
@@ -87,7 +135,9 @@ def solve_task(task, eta=1.0, decay=0.0):
             return None
         if (len(e['output']), len(e['output'][0])) != (H, W):
             return None
-    m = HebbianWorldModel(H, W, eta=eta, decay=decay)
+    best_cls = min([HebbianWorldModel, ColorRemapModel],
+                   key=lambda cls: _loo_error(cls, train, H, W, eta, decay))
+    m = _make(best_cls, H, W, eta, decay)
     for e in train:
         m.observe(e['input'], e['output'])
     return [m.predict(e['input']) for e in task['test']]

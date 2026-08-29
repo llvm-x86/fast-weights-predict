@@ -62,11 +62,10 @@ processes (the tasks are pure Python, so the GIL rules out threads).
 
 **Result (honest, transparent), exact match on the held-out test output:**
 
-| search depth | tasks solved | wall time (12 procs) |
+| search depth | ARC-AGI-1 | ARC-AGI-2 |
 |---|---|---|
-| depth-1 | 31 / 400 (7.8%) | ~0.1 s |
-| depth-2 (default) | **39 / 400 (9.8%)** | ~11 s |
-| depth-3 beam=16 | 41 / 400 (10.3%) | ~70 s |
+| depth-1 | 31 / 400 (7.8%) | — |
+| depth-2 (default) | **41 / 400 (10.2%)** | **47 / 1,000 (4.7%)** |
 
 ```bash
 python3 eval_arc.py /tmp/arc-agi/data/training 12 2     # ARC-AGI-1, depth 2 (default)
@@ -119,21 +118,24 @@ The literal dragon-hatchling: the BDH fast-weight memory applied directly to ARC
 grids. Features are position-dependent one-hot cell colors; the write is the
 Hebbian outer product `W ← W + η ψ(output) φ(input)ᵀ`; the readout is the linear
 map plus an argmax color per cell (computed without materializing the dense
-matrix). This is a world model with a *trivial* readout — there is no planner.
+matrix).
 
-Measured honestly on the same-size subset (size-changing tasks are reported as
-skipped, not hidden):
+Two fast-weight world models are learned — a position-bound map and a
+position-invariant color map — and the *dreamer* selects the one that generalizes
+best by leave-one-out error on the training set (so a model that merely memorizes
+is rejected). Measured honestly on the same-size subset (size-changing tasks are
+reported as skipped, not hidden):
 
 | benchmark | same-size tasks | solved |
 |---|---|---|
-| ARC-AGI-1 | 129 | **0** |
-| ARC-AGI-2 | 257 | **0** |
+| ARC-AGI-1 | 129 | **1 (0.8%)** |
+| ARC-AGI-2 | 257 | **1 (0.4%)** |
 
-That 0% is the finding, not a failure of the harness: an associative memory can
-only retrieve an output whose input overlaps the stored inputs, and ARC requires
-induction of a compositional rule. It confirms what the framework states — the
-power of the world-dreamer is in the planner, and a linear Hebbian substrate does
-not carry from pursuit to ARC.
+That near-zero is the finding, not a failure of the harness: an associative
+memory can only retrieve an output whose input overlaps the stored inputs (or a
+global color map), and ARC requires induction of a compositional rule. It
+confirms what the framework states — the power of the world-dreamer is in the
+planner, and a linear Hebbian substrate does not carry from pursuit to ARC.
 
 The same point holds when the dreamer is *automated*: `verify_solution.py` runs a
 language-model proposer (a solver agent per task) against the verifier. On an

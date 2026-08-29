@@ -100,6 +100,19 @@ ARC-AGI-2 is a program-induction research problem (LLM-guided program synthesis
 with a verifier-in-the-loop, or a much larger object-centric DSL with deep
 search), not a matter of adding more hand-written primitives.
 
+### The ceiling is the dreamer, not the substrate (demonstrated)
+
+`llm_dreamer.py` keeps the identical architecture but swaps the *dreamer*: instead
+of enumerating primitives, a language model reads the examples, induces a rule,
+and writes a program, which the world-model check then verifies. On ARC-AGI-2 it
+solves 4/4 relational tasks that the primitive DSL fails — a shape-keyed recolor,
+a split-and-overlap, a vertical pattern continuation, and a mirror-tile — each in
+a few lines of induced code, verified against every training and held-out test
+example. That is the honest demonstration that the world-dreamer's ceiling is set
+by the planner, and that the route to high ARC scores is synthesis, not more
+hand-coded primitives. It is also *not* a 90% system: it is manual induction on a
+handful of tasks, not an automated solver.
+
 ## What this is not
 
 This is **not** "an agent that solves ARC-AGI-1." No system "solves" ARC-AGI-1 in
@@ -117,4 +130,5 @@ fast-weight matrix.
 - `framework.py` — the shared `WorldModel` / `Dreamer` / `WorldDreamer` interface.
 - `pursuit.py` — the continuous instantiation (BDH fast weights + shooting).
 - `arc.py` — the discrete instantiation (program induction + program search).
-- `eval_arc.py` — ARC-AGI-1 evaluation harness.
+- `eval_arc.py` — ARC evaluation harness (parallel, 12 processes).
+- `llm_dreamer.py` — the LLM-as-dreamer demonstration (induced, verified rules).

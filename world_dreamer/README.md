@@ -42,32 +42,43 @@ accounting.
 
 `arc.py` is the discrete analog: the world model is the induced program, and the
 dreamer is program search (hypothesize → imagine on examples → verify). The
-primitive library covers the single-transformation classes — identity, rotation,
-reflection, translation, recolor, scaling, tiling, substitution tiling,
-flood-fill, and crop-to-object — plus one two-step composition (extract-then-
-transform).
+primitive library covers two kinds of transformation:
 
-**Result (honest, transparent): 17 / 400 (4.2%) of the ARC-AGI-1 training set,
+- **geometry** — identity, rotation, reflection, translation, recolor, scaling,
+  tiling, substitution tiling, flood-fill, crop-to-object;
+- **objectness + completion** (v2) — 4-connected object decomposition, gravity
+  (four directions), mirror-image completion across the central axis, connecting
+  same-colored points (orthogonal and diagonal), dilation, crop/remove the
+  largest or smallest object, keep-only-one-color, and recolor-objects-by-size.
+
+plus a two-step "extract the object, then transform it" composition. Every
+candidate program is verified against **all** training examples before it is used
+on the held-out test, so a wrong rule is filtered out rather than guessed.
+
+**Result (honest, transparent): 32 / 400 (8.0%) of the ARC-AGI-1 training set,
 exact match on the held-out test output.**
 
 ```bash
 python3 eval_arc.py /tmp/arc-agi/data/training
 ```
 
-The 17 solves are exactly the single-transformation tasks (`self_substitute`,
-`fill_holes`, `translate`, `rotate180`, `scale(2)`, …). The other 383 tasks are
-compositional, relational, or object-counting tasks that a hand-written primitive
-DSL does not reach — which is precisely where ARC's difficulty lies, and where the
-ARC-AGI-3 frontier (symbolic world modeling / program search at scale) is aimed.
+The 32 solves are the single-transformation and single-object tasks (`rotate`,
+`translate`, `scale(2)`, `tile`, `self_substitute`, `fill_holes`, `mirror`,
+`gravity`, `connect`, `crop_largest`, …). The other 368 tasks are compositional,
+relational, numerosity, and sequence-extrapolation tasks that a hand-written
+primitive DSL does not reach — which is precisely where ARC's difficulty lies, and
+where the ARC-AGI-3 frontier (symbolic world modeling / program search at scale)
+is aimed.
 
 ## What this is not
 
-This is **not** "an agent that solves ARC-AGI-1." ARC-AGI-1 is essentially
-saturated at ~90%+ by frontier LLMs, and its hard remainder is compositional
-program induction — an open research problem. This repository demonstrates that
-the *same* world-model-plus-dreamer architecture that works on continuous pursuit
-can be re-instantiated on discrete program induction, with transparent coverage
-numbers. The bridge from here to ARC-AGI-3 is a much richer program-induction
+This is **not** "an agent that solves ARC-AGI-1." No system "solves" ARC-AGI-1 in
+the sense of reliably matching the human baseline (~84% on the private evaluation,
+higher with retries); the compositional program-induction core remains an open
+research problem. This repository demonstrates that the *same*
+world-model-plus-dreamer architecture that works on continuous pursuit can be
+re-instantiated on discrete program induction, with transparent coverage numbers.
+The bridge from here to genuinely hard ARC is a much richer program-induction
 substrate (and a search that composes over it), not a reuse of the pursuit
 fast-weight matrix.
 

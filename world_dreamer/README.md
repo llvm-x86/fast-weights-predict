@@ -107,15 +107,16 @@ expected. The per-object map transforms and v4/v5 painting/structure/numerosity
 primitives are aimed at that core and recover a handful of tasks, but the
 composition/relation core remains out of reach for a shallow hand-written DSL.
 
-**On the held-out ARC-AGI-2 *evaluation* set (120 tasks, the real benchmark) the
-combined system scores 0 / 120 (0.0%).** This is the number that matters for the
-"does it generalize to ARC-AGI-2" question, and it is the honest answer: the
-training-set figures above are optimistic — they cover the single-transformation
-and short-composition tasks that the evaluation set was explicitly built to
-exclude. The evaluation tasks are larger, more colorful, and compositional, and
-neither the hand-written DSL nor the patch associative memory induces them. Any
-claim that this repository "solves ARC-AGI-2" would be false; it does not
-generalize at all.
+**On the held-out *evaluation* sets (the real benchmarks) the combined system
+scores 8 / 400 (2.0%) on ARC-AGI-1 and 0 / 120 (0.0%) on ARC-AGI-2.** These are
+the numbers that answer the "does it generalize" question, and the answer is:
+barely on ARC-AGI-1 and not at all on ARC-AGI-2. The training-set figures above
+are optimistic by roughly an order of magnitude — they cover the
+single-transformation and short-composition tasks that the evaluation sets were
+explicitly built to exclude. The evaluation tasks are larger, more colorful, and
+compositional/relational, and neither the hand-written DSL nor the patch
+associative memory induces them. Any claim that this repository "solves ARC-AGI-1
+or ARC-AGI-2" would be false.
 
 What *does* generalize is the architecture, not the primitives: the same
 world-model-plus-dreamer recipe (predict, then plan inside the prediction) is

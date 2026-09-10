@@ -96,6 +96,33 @@ def _components(g, bg):
     return comps
 
 
+def _components8(g, bg):
+    """8-connected same-color components (diagonal neighbours count as joined).
+    Needed by object-bbox constructions whose shapes touch only at a corner."""
+    h, w = len(g), len(g[0])
+    seen = [[False] * w for _ in range(h)]
+    comps = []
+    for r in range(h):
+        for c in range(w):
+            if g[r][c] != bg and not seen[r][c]:
+                color = g[r][c]
+                cells = []
+                stack = [(r, c)]
+                seen[r][c] = True
+                while stack:
+                    cr, cc = stack.pop()
+                    cells.append((cr, cc))
+                    for dr in (-1, 0, 1):
+                        for dc in (-1, 0, 1):
+                            nr, nc = cr + dr, cc + dc
+                            if (0 <= nr < h and 0 <= nc < w and not seen[nr][nc]
+                                    and g[nr][nc] == color):
+                                seen[nr][nc] = True
+                                stack.append((nr, nc))
+                comps.append((color, cells))
+    return comps
+
+
 def _bresenham(r0, c0, r1, c1):
     pts = []
     dr = abs(r1 - r0)
@@ -810,6 +837,44 @@ def fill_bbox_region(g, color):
     return out
 
 
+def map_bbox_fill(g, color):
+    """Fill the bounding box of *each* object with `color` (only background cells
+    are painted) — the per-object counterpart of fill_bbox_region.  Objects are
+    8-connected here: the ARC shapes that need this rule touch at a corner, so
+    4-connectivity would split one object into two and fill the wrong box."""
+    bg = _bg(g)
+    out = [list(row) for row in g]
+    for _col, cells in _components8(g, bg):
+        rs = [r for r, _ in cells]
+        cs = [c for _, c in cells]
+        r0, c0, r1, c1 = min(rs), min(cs), max(rs), max(cs)
+        for r in range(r0, r1 + 1):
+            for c in range(c0, c1 + 1):
+                if out[r][c] == bg:
+                    out[r][c] = color
+    return out
+
+
+def draw_object_cross(g, color):
+    """Draw a full horizontal + vertical line through the centre of each object's
+    bounding box (only background cells are painted)."""
+    bg = _bg(g)
+    h, w = len(g), len(g[0])
+    out = [list(row) for row in g]
+    for _col, cells in _components(g, bg):
+        rs = [r for r, _ in cells]
+        cs = [c for _, c in cells]
+        cr = (min(rs) + max(rs)) // 2
+        cc = (min(cs) + max(cs)) // 2
+        for c in range(w):
+            if out[cr][c] == bg:
+                out[cr][c] = color
+        for r in range(h):
+            if out[r][cc] == bg:
+                out[r][cc] = color
+    return out
+
+
 def crop_topleft(g, H, W):
     """Crop to the top-left H x W corner (the 'extract the fundamental unit in the
     top-left corner' family)."""
@@ -1179,6 +1244,12 @@ def _enumerate_depth1(in0, out0, fast=False):
             if _tup(fill_bbox_region(in0, c)) == target:
                 yield ('fill_bbox_region(%d)' % c,
                        (lambda cc: lambda g: fill_bbox_region(g, cc))(c))
+            if _tup(map_bbox_fill(in0, c)) == target:
+                yield ('map_bbox_fill(%d)' % c,
+                       (lambda cc: lambda g: map_bbox_fill(g, cc))(c))
+            if _tup(draw_object_cross(in0, c)) == target:
+                yield ('draw_object_cross(%d)' % c,
+                       (lambda cc: lambda g: draw_object_cross(g, cc))(c))
 
     # crop to the top-left corner at output size.  A 1x1 crop is just 'return the
     # corner cell', a degenerate rule that spuriously fits single-cell-output

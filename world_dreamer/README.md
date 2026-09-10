@@ -63,9 +63,12 @@ primitive library covers two kinds of transformation:
   components), crop the top-left corner to output size, 2-D periodic tiling, and
   drawing a line between same-colored points with a *new* color (filling only
   background cells, so intermediate same-colored points are preserved);
-- **rectangle construction** (v6) — draw the rectangle outline of the overall
-  bounding box, draw a rectangle outline around *each* object, and fill a
-  bounding box (all painting only background cells, so object pixels survive).
+- **rectangle construction** (v6/v7) — draw the rectangle outline of the overall
+  bounding box, draw a rectangle outline around *each* object, fill a bounding
+  box, fill *each* object's bounding box (8-connected, because the shapes that
+  need this rule touch only at a corner), and draw a full cross through each
+  object's centre.  All painting touches background cells only, so object pixels
+  survive.
 
 The dreamer is a **program-composition search**: depth-1 primitives, plus
 depth-2 and depth-3 compositions `f3 ∘ f2 ∘ f1` where intermediate steps are
@@ -79,8 +82,8 @@ processes (the tasks are pure Python, so the GIL rules out threads).
 
 | search depth | ARC-AGI-1 | ARC-AGI-2 |
 |---|---|---|
-| depth-1 | 45 / 400 (11.2%) | 48 / 1,000 (4.8%) |
-| depth-2 (default) | **55 / 400 (13.8%)** | **62 / 1,000 (6.2%)** |
+| depth-1 | 47 / 400 (11.8%) | 50 / 1,000 (5.0%) |
+| depth-2 (default) | **57 / 400 (14.2%)** | **64 / 1,000 (6.4%)** |
 
 ```bash
 python3 eval_arc.py /tmp/arc-agi/data/training 12 2     # ARC-AGI-1, depth 2 (default)
@@ -93,9 +96,10 @@ The solves are single-transformation, single-object, and short-composition tasks
 `mirror`, `gravity`, `connect`, `crop_largest`, `recolor_by_size`, the v4
 palette permutation, border/dominant painting, symmetry-axis completion,
 structure keep/erase (cross, diagonal, mid-row/column), checkerboard, the v5
-single-cell numerosity and connect-with-new-color rules, and the v6 rectangle
-construction (`draw_bbox_outline`/`map_bbox_outline`/`fill_bbox_region`) — plus
-two-step combinations of them). The other ~345
+single-cell numerosity and connect-with-new-color rules, and the v6/v7 rectangle
+construction (`draw_bbox_outline`/`map_bbox_outline`/`fill_bbox_region`/
+`map_bbox_fill`/`draw_object_cross`) — plus
+two-step combinations of them). The other ~343
 tasks are compositional, relational, numerosity, and sequence-extrapolation
 tasks that a hand-written primitive DSL with shallow search does not reach —
 which is precisely where ARC's difficulty lies, and where the ARC-AGI-3 frontier
@@ -105,7 +109,7 @@ which is precisely where ARC's difficulty lies, and where the ARC-AGI-3 frontier
 
 No — not in the "solved" sense, and it would be misleading to claim otherwise.
 Measured on the ARC-AGI-2 public training set (1,000 tasks), the exact same
-pipeline scores **62 / 1,000 (6.2%)**, down from 13.8% on ARC-AGI-1. ARC-AGI-2 was
+pipeline scores **64 / 1,000 (6.4%)**, down from 14.2% on ARC-AGI-1. ARC-AGI-2 was
 designed to remove the single-transformation tasks this DSL catches and to stress
 compositional object/relation reasoning, so the number drops — exactly as
 expected. The per-object map transforms and v4/v5/v6
@@ -183,8 +187,8 @@ verifies. Measured as a union on the held-out test:
 
 | benchmark | DSL alone | learned alone | **combined** |
 |---|---|---|---|
-| ARC-AGI-1 | 55 / 400 (13.8%) | 4 / 129 (3.1%) | **58 / 400 (14.5%)** |
-| ARC-AGI-2 | 62 / 1,000 (6.2%) | 2 / 257 (0.8%) | **63 / 1,000 (6.3%)** |
+| ARC-AGI-1 | 57 / 400 (14.2%) | 4 / 129 (3.1%) | **60 / 400 (15.0%)** |
+| ARC-AGI-2 | 64 / 1,000 (6.4%) | 2 / 257 (0.8%) | **65 / 1,000 (6.5%)** |
 
 The same point holds when the dreamer is *automated*: `verify_solution.py` runs a
 language-model proposer (a solver agent per task) against the verifier. On an

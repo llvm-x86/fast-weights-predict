@@ -446,15 +446,19 @@ def remove_component(g, key):
 
 
 def map_flip(g, axis):
-    """Flip each object in place (reflect its bounding box across axis 'h' or
-    'v').  The object-wise analog of a global flip — the key 'map over objects'
-    ARC-AGI-2 family."""
+    """Flip each object in place (reflect its bounding box across axis 'h', 'v',
+    'main' or 'anti').  The object-wise analog of a global flip — the key 'map
+    over objects' ARC-AGI-2 family.  'main'/'anti' transpose the box, so they
+    require a square bounding box; a non-square object leaves the grid unchanged
+    and simply fails verification rather than crashing."""
     bg = _bg(g)
     out = [list(row) for row in g]
     for color, cells in _components(g, bg):
         rs = [r for r, _ in cells]
         cs = [c for _, c in cells]
         r0, c0, r1, c1 = min(rs), min(cs), max(rs), max(cs)
+        if axis in ('main', 'anti') and (r1 - r0) != (c1 - c0):
+            return [list(row) for row in g]
         sub = [[bg] * (c1 - c0 + 1) for _ in range(r1 - r0 + 1)]
         for r, c in cells:
             sub[r - r0][c - c0] = color
@@ -747,6 +751,62 @@ def fill_uniform_cols(g, c):
         if len(set(g[r][cc] for r in range(h))) == 1:
             for r in range(h):
                 out[r][cc] = c
+    return out
+
+
+# ---- v6: rectangle construction (draw / fill a bounding box, per-object) ----
+
+def draw_bbox_outline(g, color):
+    """Draw the rectangle outline of the bounding box of all non-background
+    cells (only background cells are painted)."""
+    bg = _bg(g)
+    r0, c0, r1, c1 = _bbox_of_nonzero(g, bg)
+    out = [list(row) for row in g]
+    for c in range(c0, c1 + 1):
+        if out[r0][c] == bg:
+            out[r0][c] = color
+        if out[r1][c] == bg:
+            out[r1][c] = color
+    for r in range(r0, r1 + 1):
+        if out[r][c0] == bg:
+            out[r][c0] = color
+        if out[r][c1] == bg:
+            out[r][c1] = color
+    return out
+
+
+def map_bbox_outline(g, color):
+    """Draw a rectangle outline around *each* object (only background cells are
+    painted, so object pixels are preserved)."""
+    bg = _bg(g)
+    out = [list(row) for row in g]
+    for _col, cells in _components(g, bg):
+        rs = [r for r, _ in cells]
+        cs = [c for _, c in cells]
+        r0, c0, r1, c1 = min(rs), min(cs), max(rs), max(cs)
+        for c in range(c0, c1 + 1):
+            if out[r0][c] == bg:
+                out[r0][c] = color
+            if out[r1][c] == bg:
+                out[r1][c] = color
+        for r in range(r0, r1 + 1):
+            if out[r][c0] == bg:
+                out[r][c0] = color
+            if out[r][c1] == bg:
+                out[r][c1] = color
+    return out
+
+
+def fill_bbox_region(g, color):
+    """Fill the bounding box of all non-background cells with `color` (only
+    background cells are painted)."""
+    bg = _bg(g)
+    r0, c0, r1, c1 = _bbox_of_nonzero(g, bg)
+    out = [list(row) for row in g]
+    for r in range(r0, r1 + 1):
+        for c in range(c0, c1 + 1):
+            if out[r][c] == bg:
+                out[r][c] = color
     return out
 
 
@@ -1105,6 +1165,20 @@ def _enumerate_depth1(in0, out0, fast=False):
             if _tup(fill_uniform_cols(in0, c)) == target:
                 yield ('fill_uniform_cols(%d)' % c,
                        (lambda cc: lambda g: fill_uniform_cols(g, cc))(c))
+
+    # rectangle construction: draw/fill a bounding box (whole-grid or per-object).
+    # These paint background cells only, so they add at most one color.
+    if (h, w) == (H, W) and cdiff <= 1:
+        for c in _colors(out0) - cols:
+            if _tup(draw_bbox_outline(in0, c)) == target:
+                yield ('draw_bbox_outline(%d)' % c,
+                       (lambda cc: lambda g: draw_bbox_outline(g, cc))(c))
+            if _tup(map_bbox_outline(in0, c)) == target:
+                yield ('map_bbox_outline(%d)' % c,
+                       (lambda cc: lambda g: map_bbox_outline(g, cc))(c))
+            if _tup(fill_bbox_region(in0, c)) == target:
+                yield ('fill_bbox_region(%d)' % c,
+                       (lambda cc: lambda g: fill_bbox_region(g, cc))(c))
 
     # crop to the top-left corner at output size.  A 1x1 crop is just 'return the
     # corner cell', a degenerate rule that spuriously fits single-cell-output

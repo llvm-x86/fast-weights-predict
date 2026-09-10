@@ -62,7 +62,10 @@ primitive library covers two kinds of transformation:
   color, and the scattered 'noise' color: least frequent, ties → most
   components), crop the top-left corner to output size, 2-D periodic tiling, and
   drawing a line between same-colored points with a *new* color (filling only
-  background cells, so intermediate same-colored points are preserved).
+  background cells, so intermediate same-colored points are preserved);
+- **rectangle construction** (v6) — draw the rectangle outline of the overall
+  bounding box, draw a rectangle outline around *each* object, and fill a
+  bounding box (all painting only background cells, so object pixels survive).
 
 The dreamer is a **program-composition search**: depth-1 primitives, plus
 depth-2 and depth-3 compositions `f3 ∘ f2 ∘ f1` where intermediate steps are
@@ -76,8 +79,8 @@ processes (the tasks are pure Python, so the GIL rules out threads).
 
 | search depth | ARC-AGI-1 | ARC-AGI-2 |
 |---|---|---|
-| depth-1 | 43 / 400 (10.8%) | 46 / 1,000 (4.6%) |
-| depth-2 (default) | **53 / 400 (13.2%)** | **60 / 1,000 (6.0%)** |
+| depth-1 | 45 / 400 (11.2%) | 48 / 1,000 (4.8%) |
+| depth-2 (default) | **55 / 400 (13.8%)** | **62 / 1,000 (6.2%)** |
 
 ```bash
 python3 eval_arc.py /tmp/arc-agi/data/training 12 2     # ARC-AGI-1, depth 2 (default)
@@ -89,8 +92,10 @@ The solves are single-transformation, single-object, and short-composition tasks
 (`rotate`, `translate`, `scale(2)`, `tile`, `self_substitute`, `fill_holes`,
 `mirror`, `gravity`, `connect`, `crop_largest`, `recolor_by_size`, the v4
 palette permutation, border/dominant painting, symmetry-axis completion,
-structure keep/erase (cross, diagonal, mid-row/column), checkerboard, and
-highlight-uniform-lines — plus two-step combinations of them). The other ~350
+structure keep/erase (cross, diagonal, mid-row/column), checkerboard, the v5
+single-cell numerosity and connect-with-new-color rules, and the v6 rectangle
+construction (`draw_bbox_outline`/`map_bbox_outline`/`fill_bbox_region`) — plus
+two-step combinations of them). The other ~345
 tasks are compositional, relational, numerosity, and sequence-extrapolation
 tasks that a hand-written primitive DSL with shallow search does not reach —
 which is precisely where ARC's difficulty lies, and where the ARC-AGI-3 frontier
@@ -100,12 +105,13 @@ which is precisely where ARC's difficulty lies, and where the ARC-AGI-3 frontier
 
 No — not in the "solved" sense, and it would be misleading to claim otherwise.
 Measured on the ARC-AGI-2 public training set (1,000 tasks), the exact same
-pipeline scores **60 / 1,000 (6.0%)**, down from 13.2% on ARC-AGI-1. ARC-AGI-2 was
+pipeline scores **62 / 1,000 (6.2%)**, down from 13.8% on ARC-AGI-1. ARC-AGI-2 was
 designed to remove the single-transformation tasks this DSL catches and to stress
 compositional object/relation reasoning, so the number drops — exactly as
-expected. The per-object map transforms and v4/v5 painting/structure/numerosity
-primitives are aimed at that core and recover a handful of tasks, but the
-composition/relation core remains out of reach for a shallow hand-written DSL.
+expected. The per-object map transforms and v4/v5/v6
+painting/structure/numerosity/rectangle primitives are aimed at that core and
+recover a handful of tasks, but the composition/relation core remains out of reach
+for a shallow hand-written DSL.
 
 **On the held-out *evaluation* sets (the real benchmarks) the combined system
 scores 8 / 400 (2.0%) on ARC-AGI-1 and 0 / 120 (0.0%) on ARC-AGI-2.** The 8
@@ -177,8 +183,8 @@ verifies. Measured as a union on the held-out test:
 
 | benchmark | DSL alone | learned alone | **combined** |
 |---|---|---|---|
-| ARC-AGI-1 | 53 / 400 (13.2%) | 4 / 129 (3.1%) | **56 / 400 (14.0%)** |
-| ARC-AGI-2 | 60 / 1,000 (6.0%) | 2 / 257 (0.8%) | **61 / 1,000 (6.1%)** |
+| ARC-AGI-1 | 55 / 400 (13.8%) | 4 / 129 (3.1%) | **58 / 400 (14.5%)** |
+| ARC-AGI-2 | 62 / 1,000 (6.2%) | 2 / 257 (0.8%) | **63 / 1,000 (6.3%)** |
 
 The same point holds when the dreamer is *automated*: `verify_solution.py` runs a
 language-model proposer (a solver agent per task) against the verifier. On an

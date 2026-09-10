@@ -52,7 +52,7 @@ def evaluate(data_dir, num_workers=12, max_depth=2, beam=16):
 
 if __name__ == '__main__':
     data_dir = sys.argv[1] if len(sys.argv) > 1 else 'data/training'
-    num_workers = int(sys.argv[2]) if len(sys.argv) > 2 else 12
+    num_workers = int(sys.argv[2]) if len(sys.argv) > 2 else 8
     max_depth = int(sys.argv[3]) if len(sys.argv) > 3 else 2
     beam = int(sys.argv[4]) if len(sys.argv) > 4 else 16
     solved, failed = evaluate(data_dir, num_workers, max_depth, beam)

@@ -31,6 +31,21 @@ from functools import lru_cache
 
 # ---------------------------------------------------------------- grid helpers
 
+def _eq(g, target):
+    """True when grid `g` equals the tuple-of-tuples `target`.
+
+    `_eq(x, target)` builds a whole new nested tuple before comparing; for the
+    hundreds of primitive candidates that do *not* match, that allocation is pure
+    waste.  This compares row by row and stops at the first difference, which for
+    a non-matching candidate is usually row 0."""
+    if len(g) != len(target):
+        return False
+    for i, row in enumerate(g):
+        if tuple(row) != target[i]:
+            return False
+    return True
+
+
 def _tup(g):
     return tuple(tuple(row) for row in g)
 
@@ -213,6 +228,24 @@ def flip(g, axis):
         # rather than crashing.
         return [[g[h - 1 - c][w - 1 - r] for c in range(h)] for r in range(w)]
     raise ValueError(axis)
+
+
+def _translate_eq(g, target, dx, dy):
+    """Does translating `g` by (dx, dy) with zero fill reproduce `target`?
+
+    Equivalent to `_eq(translate(g, dx, dy), target)` but compares cell by cell
+    and returns at the first mismatch instead of materialising a whole grid.  This
+    is the inner loop of the +/-6 translation sweep, where almost every candidate
+    fails on its first few cells."""
+    h, w = len(g), len(g[0])
+    for r in range(h):
+        trow = target[r]
+        for c in range(w):
+            sr, sc = r - dy, c - dx
+            v = g[sr][sc] if (0 <= sr < h and 0 <= sc < w) else 0
+            if trow[c] != v:
+                return False
+    return True
 
 
 def translate(g, dx, dy, pad=0):
@@ -702,6 +735,38 @@ def fill_most_common(g):
     mc = cnt.most_common(1)[0][0]
     h, w = len(g), len(g[0])
     return [[mc] * w for _ in range(h)]
+
+
+def _reflect_eq(g, target, axis, pos, bg):
+    """Does completing the reflection of `g` about the axis at `pos` reproduce
+    `target`?  Same rule as `reflect_complete`, compared cell by cell with an early
+    exit, because the axis scan tries ~2*size candidates per grid."""
+    h, w = len(g), len(g[0])
+    if axis == 'v':
+        for r in range(h):
+            trow = target[r]
+            grow = g[r]
+            for c in range(w):
+                v = grow[c]
+                if v == bg:
+                    rr = int(round(2 * pos - r))
+                    if 0 <= rr < h and g[rr][c] != bg:
+                        v = g[rr][c]
+                if trow[c] != v:
+                    return False
+        return True
+    for r in range(h):
+        trow = target[r]
+        grow = g[r]
+        for c in range(w):
+            v = grow[c]
+            if v == bg:
+                cc = int(round(2 * pos - c))
+                if 0 <= cc < w and grow[cc] != bg:
+                    v = grow[cc]
+            if trow[c] != v:
+                return False
+    return True
 
 
 def reflect_complete(g, axis, pos):
@@ -1337,19 +1402,19 @@ def _enumerate_learned_maps(in0, out0):
     bg = _bg(in0)
     # recolor whole objects by their size (numerosity -> color)
     mapping = _infer_size_colors(in0, out0, bg)
-    if mapping and _tup(recolor_by_size(in0, mapping)) == target:
+    if mapping and _eq(recolor_by_size(in0, mapping), target):
         yield ('recolor_by_size', (lambda m: lambda g: recolor_by_size(g, m))(mapping))
     # recolor whole objects by the *rank* of their size.  The palette is induced
     # from this example and verified on every example, so a rank rule survives
     # examples whose size sets differ (which a size->color map cannot).
     for order in ('desc', 'asc'):
         pal = _size_rank_palette(in0, out0, bg, order)
-        if pal and _tup(recolor_by_size_rank(in0, pal, order)) == target:
+        if pal and _eq(recolor_by_size_rank(in0, pal, order), target):
             yield ('recolor_by_rank_' + order,
                    (lambda p, o: lambda g: recolor_by_size_rank(g, p, o))(pal, order))
     # global palette permutation (learned from in0 -> out0)
     mapping = _infer_recolor_map(in0, out0)
-    if mapping and len(mapping) > 1 and _tup(recolor_map(in0, mapping)) == target:
+    if mapping and len(mapping) > 1 and _eq(recolor_map(in0, mapping), target):
         yield ('recolor_map', (lambda m: lambda g: recolor_map(g, m))(mapping))
 
 
@@ -1376,19 +1441,19 @@ def _enumerate_depth1(in0, out0, fast=False, allow_learned=True):
     cdiff = len(cols ^ _colors(out0))  # color-set distance (for cheap guards)
 
     # identity
-    if (h, w) == (H, W) and _tup(in0) == target:
+    if (h, w) == (H, W) and _eq(in0, target):
         yield ('identity', lambda g: [list(r) for r in g])
 
     # rotations / reflections (size-preserving; 'anti' requires square).
     # These permute cells, so they can only match when the color sets are equal.
     if (h, w) == (H, W) and cdiff == 0:
         for k in (1, 2, 3):
-            if _tup(rotate(in0, k)) == target:
+            if _eq(rotate(in0, k), target):
                 yield ('rotate%d' % (90 * k), (lambda kk: lambda g: rotate(g, kk))(k))
         for ax in ('h', 'v', 'main'):
-            if _tup(flip(in0, ax)) == target:
+            if _eq(flip(in0, ax), target):
                 yield ('flip_' + ax, (lambda a: lambda g: flip(g, a))(ax))
-        if h == w and _tup(flip(in0, 'anti')) == target:
+        if h == w and _eq(flip(in0, 'anti'), target):
             yield ('flip_anti', lambda g: flip(g, 'anti'))
 
     # translation (size-preserving, zero-fill); also color-preserving
@@ -1398,7 +1463,7 @@ def _enumerate_depth1(in0, out0, fast=False, allow_learned=True):
             ao = _anchor(out0, h, w)
             if ai is not None and ao is not None:
                 dx, dy = ao[1] - ai[1], ao[0] - ai[0]
-                if (dx, dy) != (0, 0) and _tup(translate(in0, dx, dy)) == target:
+                if (dx, dy) != (0, 0) and _translate_eq(in0, target, dx, dy):
                     yield ('translate(%d,%d)' % (dx, dy),
                            (lambda dx_, dy_: lambda g: translate(g, dx_, dy_))(dx, dy))
         else:
@@ -1406,7 +1471,7 @@ def _enumerate_depth1(in0, out0, fast=False, allow_learned=True):
                 for dx in range(-6, 7):
                     if (dx, dy) == (0, 0):
                         continue
-                    if _tup(translate(in0, dx, dy)) == target:
+                    if _translate_eq(in0, target, dx, dy):
                         yield ('translate(%d,%d)' % (dx, dy),
                                (lambda dx_, dy_: lambda g: translate(g, dx_, dy_))(dx, dy))
 
@@ -1428,7 +1493,7 @@ def _enumerate_depth1(in0, out0, fast=False, allow_learned=True):
                     if bad:
                         break
                 if not bad and c2 is not None and c2 != c1:
-                    if _tup(recolor(in0, c1, c2)) == target:
+                    if _eq(recolor(in0, c1, c2), target):
                         yield ('recolor(%d->%d)' % (c1, c2),
                                (lambda a, b: lambda g: recolor(g, a, b))(c1, c2))
         else:
@@ -1436,50 +1501,52 @@ def _enumerate_depth1(in0, out0, fast=False, allow_learned=True):
                 for c2 in range(10):
                     if c2 == c1:
                         continue
-                    if _tup(recolor(in0, c1, c2)) == target:
+                    if _eq(recolor(in0, c1, c2), target):
                         yield ('recolor(%d->%d)' % (c1, c2),
                                (lambda a, b: lambda g: recolor(g, a, b))(c1, c2))
 
     # scale (each cell -> k x k block)
     if H % h == 0 and W % w == 0 and H // h == W // w:
         k = H // h
-        if k >= 1 and _tup(scale(in0, k)) == target:
+        if k >= 1 and _eq(scale(in0, k), target):
             yield ('scale(%d)' % k, (lambda kk: lambda g: scale(g, kk))(k))
 
     # tile (repeat whole grid n x m)
     if H % h == 0 and W % w == 0:
         n, m = H // h, W // w
-        if (n, m) != (1, 1) and _tup(tile(in0, n, m)) == target:
+        if (n, m) != (1, 1) and _eq(tile(in0, n, m), target):
             yield ('tile(%dx%d)' % (n, m), (lambda nn, mm: lambda g: tile(g, nn, mm))(n, m))
 
     # self-substitution tiling (each fg cell -> the grid)
     if H == h * h and W == w * w:
-        if _tup(self_substitute(in0)) == target:
+        if _eq(self_substitute(in0), target):
             yield ('self_substitute', lambda g: self_substitute(g))
 
     # sequence extrapolation: continue the repeating row/column pattern
-    if w == W and _tup(extend_rows(in0, H)) == target:
+    if w == W and _eq(extend_rows(in0, H), target):
         yield ('extend_rows', lambda g: extend_rows(g, H))
-    if h == H and _tup(extend_cols(in0, W)) == target:
+    if h == H and _eq(extend_cols(in0, W), target):
         yield ('extend_cols', lambda g: extend_cols(g, W))
 
     # crop to bounding box of non-background
     cr = crop_to_bbox(in0)
-    if _tup(cr) == target:
+    if _eq(cr, target):
         yield ('crop', lambda g: crop_to_bbox(g))
 
     # flood fills (size-preserving); each adds at most one color
     if (h, w) == (H, W) and cdiff <= 1:
-        for c in range(10):
-            if _tup(fill_from_border(in0, c)) == target:
+        # a fill paints with `c`, so `c` must occur in the output; if nothing is
+        # painted the grid was already the answer and identity would have matched
+        for c in _colors(out0):
+            if _eq(fill_from_border(in0, c), target):
                 yield ('fill_border(%d)' % c, (lambda cc: lambda g: fill_from_border(g, cc))(c))
-            if _tup(fill_holes(in0, c)) == target:
+            if _eq(fill_holes(in0, c), target):
                 yield ('fill_holes(%d)' % c, (lambda cc: lambda g: fill_holes(g, cc))(c))
 
     # gravity (size-preserving), all four directions — color-preserving
     if (h, w) == (H, W) and cdiff == 0:
         for d in ('down', 'up', 'left', 'right'):
-            if _tup(gravity(in0, d)) == target:
+            if _eq(gravity(in0, d), target):
                 yield ('gravity_' + d, (lambda dd: lambda g: gravity(g, dd))(d))
 
     # gravity of a single color (others stay put) — color-preserving
@@ -1488,42 +1555,42 @@ def _enumerate_depth1(in0, out0, fast=False, allow_learned=True):
             for c in cols:
                 if c == bg:
                     continue
-                if _tup(gravity_color(in0, c, d)) == target:
+                if _eq(gravity_color(in0, c, d), target):
                     yield ('gravity_color(%d,%s)' % (c, d),
                            (lambda cc, dd: lambda g: gravity_color(g, cc, dd))(c, d))
 
     # mirror completion (size-preserving) — color-preserving
     if (h, w) == (H, W) and cdiff == 0:
         for ax in ('h', 'v'):
-            if _tup(mirror_union(in0, ax)) == target:
+            if _eq(mirror_union(in0, ax), target):
                 yield ('mirror_' + ax, (lambda a: lambda g: mirror_union(g, a))(ax))
 
     # connect points (size-preserving) — color-preserving
     if (h, w) == (H, W) and cdiff == 0:
-        if _tup(connect_points(in0)) == target:
+        if _eq(connect_points(in0), target):
             yield ('connect', lambda g: connect_points(g))
-        if _tup(connect_diag(in0)) == target:
+        if _eq(connect_diag(in0), target):
             yield ('connect_diag', lambda g: connect_diag(g))
 
     # connect same-colored points with a *new* color (adds a color: cdiff <= 1)
     if (h, w) == (H, W) and cdiff <= 1:
         for L in _colors(out0) - cols:
-            if _tup(connect_newcolor(in0, L)) == target:
+            if _eq(connect_newcolor(in0, L), target):
                 yield ('connect_newcolor(%d)' % L,
                        (lambda cc: lambda g: connect_newcolor(g, cc))(L))
 
     # dilation (size-preserving) — color-preserving
     if (h, w) == (H, W) and cdiff == 0:
-        if _tup(dilate(in0)) == target:
+        if _eq(dilate(in0), target):
             yield ('dilate', lambda g: dilate(g))
 
     # per-object map transforms (size-preserving) — color-preserving
     if (h, w) == (H, W) and cdiff == 0:
         for ax in ('h', 'v'):
-            if _tup(map_flip(in0, ax)) == target:
+            if _eq(map_flip(in0, ax), target):
                 yield ('map_flip_' + ax, (lambda a: lambda g: map_flip(g, a))(ax))
         for k in (1, 2, 3):
-            if _tup(map_rotate(in0, k)) == target:
+            if _eq(map_rotate(in0, k), target):
                 yield ('map_rotate%d' % (90 * k), (lambda kk: lambda g: map_rotate(g, kk))(k))
 
     # single-cell numerosity: output the least/most frequent color, or the
@@ -1531,17 +1598,17 @@ def _enumerate_depth1(in0, out0, fast=False, allow_learned=True):
     # before the crop rules because, for a 1x1 output, 'count/identify a color' is
     # the honest rule and 'crop to a single cell' is a degenerate one.
     if (H, W) == (1, 1):
-        if _tup(noise_color(in0)) == target:
+        if _eq(noise_color(in0), target):
             yield ('noise_color', lambda g: noise_color(g))
-        if _tup(least_common_color(in0)) == target:
+        if _eq(least_common_color(in0), target):
             yield ('least_common_color', lambda g: least_common_color(g))
-        if _tup(most_common_color(in0)) == target:
+        if _eq(most_common_color(in0), target):
             yield ('most_common_color', lambda g: most_common_color(g))
 
     # crop to a single object (largest / smallest)
     for key in ('largest', 'smallest'):
         co = crop_component(in0, key)
-        if _tup(co) == target:
+        if _eq(co, target):
             yield ('crop_' + key, (lambda k: lambda g: crop_component(g, k))(key))
 
     # keep only one color (size-preserving)
@@ -1549,23 +1616,23 @@ def _enumerate_depth1(in0, out0, fast=False, allow_learned=True):
         for c in cols:
             if c == bg:
                 continue
-            if _tup(keep_color(in0, c)) == target:
+            if _eq(keep_color(in0, c), target):
                 yield ('keep_color(%d)' % c, (lambda cc: lambda g: keep_color(g, cc))(c))
 
     # remove the largest / smallest component (size-preserving denoising)
     if (h, w) == (H, W):
         for key in ('largest', 'smallest'):
-            if _tup(remove_component(in0, key)) == target:
+            if _eq(remove_component(in0, key), target):
                 yield ('remove_' + key, (lambda k: lambda g: remove_component(g, k))(key))
 
     # border painting (size-preserving)
     if (h, w) == (H, W):
-        for c in range(10):
-            if _tup(draw_border(in0, c)) == target:
+        for c in _colors(out0):
+            if _eq(draw_border(in0, c), target):
                 yield ('draw_border(%d)' % c, (lambda cc: lambda g: draw_border(g, cc))(c))
 
     # dominant-color flood (size-preserving)
-    if (h, w) == (H, W) and _tup(fill_most_common(in0)) == target:
+    if (h, w) == (H, W) and _eq(fill_most_common(in0), target):
         yield ('fill_most_common', lambda g: fill_most_common(g))
 
     # symmetry-axis completion: reflect about a detected (half-integer) axis.
@@ -1573,39 +1640,39 @@ def _enumerate_depth1(in0, out0, fast=False, allow_learned=True):
         for ax, extent in (('v', h), ('h', w)):
             for i in range(2 * extent + 1):
                 pos = i / 2.0
-                if _tup(reflect_complete(in0, ax, pos)) == target:
+                if _reflect_eq(in0, target, ax, pos, bg):
                     yield ('reflect_%s(%.1f)' % (ax, pos),
                            (lambda a, p: lambda g: reflect_complete(g, a, p))(ax, pos))
 
     # structure extraction (cross / X through the centre, keep or erase); these
     # erase to 0, which can add/remove the 0 color, so they are gated on size only.
     if (h, w) == (H, W):
-        if _tup(keep_cross(in0)) == target:
+        if _eq(keep_cross(in0), target):
             yield ('keep_cross', lambda g: keep_cross(g))
         for which in ('main', 'anti', 'both'):
-            if _tup(keep_diag(in0, which)) == target:
+            if _eq(keep_diag(in0, which), target):
                 yield ('keep_diag_' + which,
                        (lambda q: lambda g: keep_diag(g, q))(which))
-        if _tup(keep_mid_row(in0)) == target:
+        if _eq(keep_mid_row(in0), target):
             yield ('keep_mid_row', lambda g: keep_mid_row(g))
-        if _tup(keep_mid_col(in0)) == target:
+        if _eq(keep_mid_col(in0), target):
             yield ('keep_mid_col', lambda g: keep_mid_col(g))
-        if _tup(remove_cross(in0)) == target:
+        if _eq(remove_cross(in0), target):
             yield ('remove_cross', lambda g: remove_cross(g))
         for which in ('main', 'anti', 'both'):
-            if _tup(remove_diag(in0, which)) == target:
+            if _eq(remove_diag(in0, which), target):
                 yield ('remove_diag_' + which,
                        (lambda q: lambda g: remove_diag(g, q))(which))
-        if _tup(checkerboard(in0)) == target:
+        if _eq(checkerboard(in0), target):
             yield ('checkerboard', lambda g: checkerboard(g))
 
     # highlight uniform rows / columns (size-preserving)
     if (h, w) == (H, W):
-        for c in range(10):
-            if _tup(fill_uniform_rows(in0, c)) == target:
+        for c in _colors(out0):
+            if _eq(fill_uniform_rows(in0, c), target):
                 yield ('fill_uniform_rows(%d)' % c,
                        (lambda cc: lambda g: fill_uniform_rows(g, cc))(c))
-            if _tup(fill_uniform_cols(in0, c)) == target:
+            if _eq(fill_uniform_cols(in0, c), target):
                 yield ('fill_uniform_cols(%d)' % c,
                        (lambda cc: lambda g: fill_uniform_cols(g, cc))(c))
 
@@ -1613,19 +1680,19 @@ def _enumerate_depth1(in0, out0, fast=False, allow_learned=True):
     # These paint background cells only, so they add at most one color.
     if (h, w) == (H, W) and cdiff <= 1:
         for c in _colors(out0) - cols:
-            if _tup(draw_bbox_outline(in0, c)) == target:
+            if _eq(draw_bbox_outline(in0, c), target):
                 yield ('draw_bbox_outline(%d)' % c,
                        (lambda cc: lambda g: draw_bbox_outline(g, cc))(c))
-            if _tup(map_bbox_outline(in0, c)) == target:
+            if _eq(map_bbox_outline(in0, c), target):
                 yield ('map_bbox_outline(%d)' % c,
                        (lambda cc: lambda g: map_bbox_outline(g, cc))(c))
-            if _tup(fill_bbox_region(in0, c)) == target:
+            if _eq(fill_bbox_region(in0, c), target):
                 yield ('fill_bbox_region(%d)' % c,
                        (lambda cc: lambda g: fill_bbox_region(g, cc))(c))
-            if _tup(map_bbox_fill(in0, c)) == target:
+            if _eq(map_bbox_fill(in0, c), target):
                 yield ('map_bbox_fill(%d)' % c,
                        (lambda cc: lambda g: map_bbox_fill(g, cc))(c))
-            if _tup(draw_object_cross(in0, c)) == target:
+            if _eq(draw_object_cross(in0, c), target):
                 yield ('draw_object_cross(%d)' % c,
                        (lambda cc: lambda g: draw_object_cross(g, cc))(c))
 
@@ -1634,16 +1701,16 @@ def _enumerate_depth1(in0, out0, fast=False, allow_learned=True):
     # 2x2 layout: mirror tiling grows the grid to 2H x 2W
     if H == 2 * h and W == 2 * w:
         for mode in ('both', 'mirror_h', 'mirror_v', 'replicate'):
-            if _tup(mirror_tile(in0, mode)) == target:
+            if _eq(mirror_tile(in0, mode), target):
                 yield ('mirror_tile_' + mode, (lambda m: lambda g: mirror_tile(g, m))(mode))
 
     # 2x2 layout as a logical combination or overlay of the four quadrants
     if (h, w) == (H, W) and cdiff == 0:
         for op in ('or', 'xor', 'and', 'majority'):
-            if _tup(quad_combine(in0, op)) == target:
+            if _eq(quad_combine(in0, op), target):
                 yield ('quad_' + op, (lambda o: lambda g: quad_combine(g, o))(op))
         for order in ((3, 2, 1), (1, 2, 3), (2, 3, 1), (0, 1, 2, 3)):
-            if _tup(quad_overlay(in0, order)) == target:
+            if _eq(quad_overlay(in0, order), target):
                 yield ('quad_overlay_%d%d%d%d' % (order if len(order) == 4 else order + (0,)),
                        (lambda o: lambda g: quad_overlay(g, o))(order))
 
@@ -1653,38 +1720,38 @@ def _enumerate_depth1(in0, out0, fast=False, allow_learned=True):
     if (h, w) == (H, W) and cdiff == 0:
         for sep in _colors(in0):
             for op in ('or', 'xor', 'majority', 'and'):
-                if _tup(panel_combine(in0, op, sep)) == target:
+                if _eq(panel_combine(in0, op, sep), target):
                     yield ('panels_%s(%d)' % (op, sep),
                            (lambda o, s: lambda g: panel_combine(g, o, s))(op, sep))
 
     # strip the uniform separator rows/columns (shrinks)
     for sep in _colors(in0):
         rs = remove_separator(in0, sep)
-        if _tup(rs) == target and (len(rs), len(rs[0])) != (h, w):
+        if _eq(rs, target) and (len(rs), len(rs[0])) != (h, w):
             yield ('remove_separator(%d)' % sep, (lambda s: lambda g: remove_separator(g, s))(sep))
 
     # point-symmetry completion
-    if (h, w) == (H, W) and cdiff == 0 and _tup(mirror_point(in0)) == target:
+    if (h, w) == (H, W) and cdiff == 0 and _eq(mirror_point(in0), target):
         yield ('mirror_hv', lambda g: mirror_point(g))
 
     # denoise: erase cells with no non-background neighbour
-    if (h, w) == (H, W) and _tup(remove_isolated(in0)) == target:
+    if (h, w) == (H, W) and _eq(remove_isolated(in0), target):
         yield ('remove_isolated', lambda g: remove_isolated(g))
 
     # per-object outlines (size-preserving, adds at most one color)
     if (h, w) == (H, W) and cdiff <= 1:
         for c in _colors(out0):
             for conn in (4, 8):
-                if _tup(object_outline(in0, c, conn)) == target:
+                if _eq(object_outline(in0, c, conn), target):
                     yield ('object_outline_%d(%d)' % (conn, c),
                            (lambda cc, cn: lambda g: object_outline(g, cc, cn))(c, conn))
-                if _tup(object_outline(in0, c, conn, True)) == target:
+                if _eq(object_outline(in0, c, conn, True), target):
                     yield ('object_outline_%d_keep(%d)' % (conn, c),
                            (lambda cc, cn: lambda g: object_outline(g, cc, cn, True))(c, conn))
 
     # crop to the content bounding box, then scale
     for k in (2, 3):
-        if _tup(crop_then_scale(in0, k)) == target:
+        if _eq(crop_then_scale(in0, k), target):
             yield ('crop_then_scale(%d)' % k, (lambda kk: lambda g: crop_then_scale(g, kk))(k))
 
     # crop to the top-left corner at output size.  A 1x1 crop is just 'return the
@@ -1692,22 +1759,26 @@ def _enumerate_depth1(in0, out0, fast=False, allow_learned=True):
     # tasks, so it is excluded; the single-cell numerosity primitives below are the
     # honest 1x1 family.
     if H <= h and W <= w and (H, W) != (h, w) and (H, W) != (1, 1) \
-            and _tup(crop_topleft(in0, H, W)) == target:
+            and _eq(crop_topleft(in0, H, W), target):
         yield ('crop_topleft', (lambda hh, ww: lambda g: crop_topleft(g, hh, ww))(H, W))
 
     # 2-D period tiling to output size (grows or shrinks, but not a 1x1 crop)
-    if (H, W) != (1, 1) and _tup(tile_2d(in0, H, W)) == target:
+    if (H, W) != (1, 1) and _eq(tile_2d(in0, H, W), target):
         yield ('tile_2d', (lambda hh, ww: lambda g: tile_2d(g, hh, ww))(H, W))
 
-    # numerosity: count components -> a row / column / diagonal of cells
+    # numerosity: count components -> a row / column / diagonal of cells.
+    # A count primitive has exactly one possible shape, so the output size alone
+    # decides which of the three can even apply -- checking that first avoids
+    # materialising an N x N grid for every colour of every candidate pair.
+    ncomp = len(_components(in0, bg))
     for color in _colors(out0):
         if color == bg and len(_colors(out0)) > 1:
             continue
-        if _tup(count_row(in0, color)) == target:
+        if (H, W) == (1, ncomp) and _eq(count_row(in0, color), target):
             yield ('count_row(%d)' % color, (lambda cc: lambda g: count_row(g, cc))(color))
-        if _tup(count_col(in0, color)) == target:
+        if (H, W) == (ncomp, 1) and _eq(count_col(in0, color), target):
             yield ('count_col(%d)' % color, (lambda cc: lambda g: count_col(g, cc))(color))
-        if _tup(count_diag(in0, color)) == target:
+        if (H, W) == (ncomp, ncomp) and _eq(count_diag(in0, color), target):
             yield ('count_diag(%d)' % color, (lambda cc: lambda g: count_diag(g, cc))(color))
 
     # (single-cell numerosity is tried earlier, before the degenerate crop rules)
@@ -1820,6 +1891,8 @@ def _size_compatible(g, out0):
         return True  # extend_rows: any height, width fixed
     if h == H:
         return True  # extend_cols: any width, height fixed
+    if H <= h and W <= w:
+        return True  # crop_to_bbox / crop_component / crop_topleft can shrink
     return False
 
 
@@ -1883,8 +1956,16 @@ def find_program(train, max_depth=2, beam=16):
     # only the explanations that do not re-learn a palette, and pass 2 admits them
     # as a fallback.  Both passes verify against every training example, so this
     # changes only which verified program is preferred, never whether one is.
+    outc = _colors(out0)
     for learned_pass in (False, True):
-        for f1name, f1, g1, size_ok in g1_entries:
+        # In the learned pass the first step is ordered by how close its colour set
+        # already is to the target's, so an intermediate that carries the target
+        # palette is preferred over one that merely reaches it by re-colouring.
+        # The learned second step reproduces example 1 by construction, so this
+        # ordering is what separates a real hypothesis from a coincidental fit.
+        entries = g1_entries if not learned_pass else sorted(
+            g1_entries, key=lambda e: len(_colors(e[2]) ^ outc))
+        for f1name, f1, g1, size_ok in entries:
             if not size_ok:
                 continue
             f2s = _enumerate_learned_maps(g1, out0) if learned_pass \

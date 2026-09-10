@@ -51,7 +51,7 @@ def evaluate(data_dir, num_workers=12):
 
 if __name__ == '__main__':
     data_dir = sys.argv[1] if len(sys.argv) > 1 else '/tmp/arc-agi/data/training'
-    num_workers = int(sys.argv[2]) if len(sys.argv) > 2 else 12
+    num_workers = int(sys.argv[2]) if len(sys.argv) > 2 else 8
     solved, failed = evaluate(data_dir, num_workers)
     n = len(solved) + len(failed)
     print(f'{os.path.basename(data_dir)} combined (DSL + learned): '

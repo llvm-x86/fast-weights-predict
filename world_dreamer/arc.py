@@ -27,6 +27,7 @@
 # the held-out test, so a wrong rule is filtered out rather than guessed.
 
 from collections import Counter, defaultdict, deque
+from functools import lru_cache
 
 # ---------------------------------------------------------------- grid helpers
 
@@ -37,13 +38,34 @@ def _tup(g):
 def _bg(g):
     """Background color.  ARC-AGI-1 uses black (0) as background whenever it is
     present; fully-colored grids have no 0, so fall back to the most common color
-    (the object/numerosity tasks with no background cells)."""
-    cnt = Counter()
+    (the object/numerosity tasks with no background cells).
+
+    The 0 fast path scans rows and returns on the first hit, which is what almost
+    every ARC grid takes; the no-0 branch counts into a small dict while preserving
+    first-seen order so the tie-break matches `Counter.most_common`."""
     for row in g:
-        cnt.update(row)
-    if 0 in cnt:
+        for v in row:
+            if v == 0:
+                return 0
+    cnt = {}
+    order = []
+    for row in g:
+        for v in row:
+            n = cnt.get(v)
+            if n is None:
+                cnt[v] = 1
+                order.append(v)
+            else:
+                cnt[v] = n + 1
+    if not order:
         return 0
-    return cnt.most_common(1)[0][0]
+    best = order[0]
+    bc = cnt[best]
+    for v in order:
+        if cnt[v] > bc:
+            bc = cnt[v]
+            best = v
+    return best
 
 
 def _colors(g):
@@ -60,19 +82,29 @@ def _bbox_of_nonzero(g, bg=0):
     for r in range(h):
         for c in range(w):
             if g[r][c] != bg:
-                if r0 is None:
-                    r0, c0 = r, c
-                r1 = max(r1, r)
-                c1 = max(c1, c)
+                if r0 is None or r < r0:
+                    r0 = r
+                if c0 is None or c < c0:
+                    c0 = c
+                if r > r1:
+                    r1 = r
+                if c > c1:
+                    c1 = c
     if r0 is None:
         return 0, 0, h - 1, w - 1
     return r0, c0, r1, c1
 
 
-def _components(g, bg):
-    """4-connected same-color components of the non-background cells.
+def _key(g):
+    """Hashable snapshot of a grid (tuples hash by content, so this is the cache
+    key for every derived quantity)."""
+    return tuple(map(tuple, g))
 
-    Returns a list of (color, cells) with cells as a list of (r, c)."""
+
+@lru_cache(maxsize=4096)
+def _components_cached(key, bg):
+    """Cached worker for `_components`; `key` is a tuple-of-tuples grid."""
+    g = key
     h, w = len(g), len(g[0])
     seen = [[False] * w for _ in range(h)]
     comps = []
@@ -92,8 +124,19 @@ def _components(g, bg):
                                 and g[nr][nc] == color):
                             seen[nr][nc] = True
                             stack.append((nr, nc))
-                comps.append((color, cells))
-    return comps
+                comps.append((color, tuple(cells)))
+    return tuple(comps)
+
+
+def _components(g, bg):
+    """4-connected same-color components of the non-background cells.
+
+    Returns a list of (color, cells) with cells as a list of (r, c).  The
+    decomposition is memoised: one `_enumerate_depth1` sweep asks for the same
+    grid's components many times over (numerosity, crop, denoise, recolour), and
+    the cache is what makes that sweep affordable.  A fresh outer list is returned
+    each call so callers may sort or filter it freely."""
+    return [(color, cells) for color, cells in _components_cached(_key(g), bg)]
 
 
 def _components8(g, bg):
@@ -300,6 +343,39 @@ def gravity(g, direction):
     return out
 
 
+def gravity_color(g, color, direction):
+    """Gravity applied to cells of ONE color only; every other color stays put.
+    This expresses the 'sand/water' family where one color sinks through another
+    (e.g. the 1s fall to the bottom of each column past the stationary 5s)."""
+    h, w = len(g), len(g[0])
+    out = [list(row) for row in g]
+    for r in range(h):
+        for c in range(w):
+            if out[r][c] == color:
+                out[r][c] = 0
+    if direction == 'down':
+        for c in range(w):
+            n = sum(1 for r in range(h) if g[r][c] == color)
+            for i in range(n):
+                out[h - n + i][c] = color
+    elif direction == 'up':
+        for c in range(w):
+            n = sum(1 for r in range(h) if g[r][c] == color)
+            for i in range(n):
+                out[i][c] = color
+    elif direction == 'right':
+        for r in range(h):
+            n = sum(1 for c in range(w) if g[r][c] == color)
+            for i in range(n):
+                out[r][w - n + i] = color
+    elif direction == 'left':
+        for r in range(h):
+            n = sum(1 for c in range(w) if g[r][c] == color)
+            for i in range(n):
+                out[r][i] = color
+    return out
+
+
 def mirror_union(g, axis):
     """Complete a partial mirror image: reflect the non-background cells across
     the central axis and union the reflection into the background cells."""
@@ -413,7 +489,7 @@ def crop_component(g, key):
     comps = _components(g, bg)
     if not comps:
         return [list(row) for row in g]
-    comps.sort(key=lambda cc: len(cc[1]), reverse=(key == 'largest'))
+    comps = sorted(comps, key=lambda cc: len(cc[1]), reverse=(key == 'largest'))
     color, cells = comps[0]
     rs = [r for r, _ in cells]
     cs = [c for _, c in cells]
@@ -464,7 +540,7 @@ def remove_component(g, key):
     comps = _components(g, bg)
     if not comps:
         return [list(row) for row in g]
-    comps.sort(key=lambda cc: len(cc[1]), reverse=(key == 'largest'))
+    comps = sorted(comps, key=lambda cc: len(cc[1]), reverse=(key == 'largest'))
     cells = comps[0][1]
     out = [list(row) for row in g]
     for r, c in cells:
@@ -965,6 +1041,268 @@ def most_common_color(g):
     return [[max(cnt.items(), key=lambda kv: (kv[1], kv[0]))[0]]]
 
 
+# ------------------------------------------------- v8: layout, rank, tiling
+
+def _size_rank_palette(in0, out0, bg, order):
+    """Learn rank -> color from one example, where rank orders the *distinct
+    component sizes* (not the sizes themselves).  Learned from example 1 and
+    verified on all, exactly like `recolor_map`.  Returns None if a component's
+    cells do not all receive one output color."""
+    comps = _components(in0, bg)
+    if not comps:
+        return None
+    sizes = sorted(set(len(cells) for _, cells in comps), reverse=(order == 'desc'))
+    rank = {s: i for i, s in enumerate(sizes)}
+    pal = {}
+    for _, cells in comps:
+        outs = set(out0[r][c] for r, c in cells)
+        if len(outs) != 1:
+            return None
+        r = rank[len(cells)]
+        v = outs.pop()
+        if r in pal and pal[r] != v:
+            return None
+        pal[r] = v
+    return [pal[i] for i in sorted(pal)] or None
+
+
+def recolor_by_size_rank(g, palette, order):
+    """Recolor every object by the rank of its size (largest first for 'desc'),
+    taking the color from the induced rank palette.  Ranks past the learned
+    palette keep their original color, so the rule degrades rather than guesses."""
+    bg = _bg(g)
+    comps = _components(g, bg)
+    if not comps:
+        return [list(row) for row in g]
+    sizes = sorted(set(len(cells) for _, cells in comps), reverse=(order == 'desc'))
+    rank = {s: i for i, s in enumerate(sizes)}
+    out = [list(row) for row in g]
+    for _, cells in comps:
+        i = rank[len(cells)]
+        if i < len(palette):
+            for r, c in cells:
+                out[r][c] = palette[i]
+    return out
+
+
+def _uniform_lines(g, color):
+    """Row/column indices that are entirely `color` (grid separators)."""
+    h, w = len(g), len(g[0])
+    rows = [r for r in range(h) if all(v == color for v in g[r])]
+    cols = [c for c in range(w) if all(g[r][c] == color for r in range(h))]
+    return rows, cols
+
+
+def remove_separator(g, color):
+    """Delete the uniform separator rows/columns of `color` (the 'strip the grid
+    lines and keep the panels' rule)."""
+    h, w = len(g), len(g[0])
+    rows, cols = _uniform_lines(g, color)
+    if not rows and not cols:
+        return [list(row) for row in g]
+    keep_r = [r for r in range(h) if r not in rows]
+    keep_c = [c for c in range(w) if c not in cols]
+    if not keep_r or not keep_c:
+        return [list(row) for row in g]
+    return [[g[r][c] for c in keep_c] for r in keep_r]
+
+
+def extract_panels(g, color):
+    """Sub-grids delimited by uniform `color` separator rows/columns.  Returns the
+    whole grid as a single panel when there is no separator, so callers always get
+    a non-empty list."""
+    h, w = len(g), len(g[0])
+    rows, cols = _uniform_lines(g, color)
+    rs = [-1] + rows + [h]
+    cs = [-1] + cols + [w]
+    out = []
+    for i in range(len(rs) - 1):
+        for j in range(len(cs) - 1):
+            r0, r1 = rs[i] + 1, rs[i + 1]
+            c0, c1 = cs[j] + 1, cs[j + 1]
+            if r0 < r1 and c0 < c1:
+                out.append([[g[r][c] for c in range(c0, c1)] for r in range(r0, r1)])
+    return out
+
+
+def _same_shape(grids):
+    if len(grids) < 2:
+        return False
+    if any(not g or not g[0] for g in grids):
+        return False
+    h, w = len(grids[0]), len(grids[0][0])
+    return all(len(p) == h and len(p[0]) == w for p in grids)
+
+
+def _combine_grids(grids, op, bg):
+    """Cellwise logical combination of equal-shaped grids.  A cell is 'on' when it
+    differs from the background; 'or' takes the first on-cell, 'and' requires all,
+    'xor' exactly one, 'majority' more than half."""
+    n = len(grids)
+    out = []
+    for r in range(len(grids[0])):
+        row = []
+        for c in range(len(grids[0][0])):
+            nz = [p[r][c] for p in grids if p[r][c] != bg]
+            if op == 'or':
+                v = nz[0] if nz else bg
+            elif op == 'and':
+                v = nz[0] if len(nz) == n else bg
+            elif op == 'xor':
+                v = nz[0] if len(nz) == 1 else bg
+            else:
+                v = nz[0] if len(nz) * 2 > n else bg
+            row.append(v)
+        out.append(row)
+    return out
+
+
+def panel_combine(g, op, color=0):
+    """Combine the separator-delimited panels of a grid by a cellwise logical op."""
+    panels = extract_panels(g, color)
+    if not _same_shape(panels):
+        return [list(row) for row in g]
+    return _combine_grids(panels, op, _bg(g))
+
+
+def split_grid4(g):
+    """The four quadrants of a 2x2 layout, or None.  Handles a plain even split and
+    a separator-delimited layout (odd size with a uniform middle row and column)."""
+    h, w = len(g), len(g[0])
+    if h % 2 == 1 and w % 2 == 1:
+        mr, mc = h // 2, w // 2
+        if len(set(g[mr])) == 1 and len(set(g[r][mc] for r in range(h))) == 1:
+            return [[[g[r][c] for c in range(mc)] for r in range(mr)],
+                    [[g[r][c] for c in range(mc + 1, w)] for r in range(mr)],
+                    [[g[r][c] for c in range(mc)] for r in range(mr + 1, h)],
+                    [[g[r][c] for c in range(mc + 1, w)] for r in range(mr + 1, h)]]
+    if h % 2 == 0 and w % 2 == 0:
+        mr, mc = h // 2, w // 2
+        return [[[g[r][c] for c in range(mc)] for r in range(mr)],
+                [[g[r][c] for c in range(mc, w)] for r in range(mr)],
+                [[g[r][c] for c in range(mc)] for r in range(mr, h)],
+                [[g[r][c] for c in range(mc, w)] for r in range(mr, h)]]
+    return None
+
+
+def quad_combine(g, op):
+    """Combine the four quadrants of a 2x2 layout cellwise ('or'/'and'/'xor'/majority)."""
+    q = split_grid4(g)
+    if q is None or not _same_shape(q):
+        return [list(row) for row in g]
+    return _combine_grids(q, op, _bg(g))
+
+
+def quad_overlay(g, order):
+    """Overlay the quadrants of a 2x2 layout in order, later ones winning on
+    non-background cells (the 'apply one panel as a mask/stamp over another')."""
+    q = split_grid4(g)
+    if q is None or not _same_shape(q):
+        return [list(row) for row in g]
+    bg = _bg(g)
+    out = [list(r) for r in q[0]]
+    for i in order:
+        p = q[i]
+        for r in range(len(p)):
+            for c in range(len(p[0])):
+                if p[r][c] != bg:
+                    out[r][c] = p[r][c]
+    return out
+
+
+def mirror_tile(g, mode):
+    """Tile the grid 2x2, optionally mirroring: 'replicate' (plain), 'mirror_h'
+    (left-right), 'mirror_v' (top-bottom) or 'both' (fourfold symmetry)."""
+    A = [list(r) for r in g]
+
+    def fh(x):
+        return [list(reversed(r)) for r in x]
+
+    def fv(x):
+        return [list(r) for r in reversed(x)]
+
+    B = fh(A) if mode in ('mirror_h', 'both') else A
+    C = fv(A) if mode in ('mirror_v', 'both') else A
+    D = fv(B) if mode in ('mirror_h', 'mirror_v', 'both') else A
+    top = [A[r] + B[r] for r in range(len(A))]
+    bot = [C[r] + D[r] for r in range(len(C))]
+    return top + bot
+
+
+def mirror_point(g):
+    """Point-symmetry completion: fill background cells from the 180-degree
+    rotation (the diagonal-mirror analog of `mirror_union`)."""
+    bg = _bg(g)
+    h, w = len(g), len(g[0])
+    out = [list(row) for row in g]
+    for r in range(h):
+        for c in range(w):
+            if out[r][c] == bg:
+                out[r][c] = g[h - 1 - r][w - 1 - c]
+    return out
+
+
+def remove_isolated(g):
+    """Erase cells with no non-background neighbour (denoising the scattered
+    singleton that does not belong to any object)."""
+    bg = _bg(g)
+    h, w = len(g), len(g[0])
+    out = [list(row) for row in g]
+    for r in range(h):
+        for c in range(w):
+            if g[r][c] == bg:
+                continue
+            n = 0
+            for dr in (-1, 0, 1):
+                for dc in (-1, 0, 1):
+                    if dr == 0 and dc == 0:
+                        continue
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < h and 0 <= nc < w and g[nr][nc] != bg:
+                        n += 1
+            if n == 0:
+                out[r][c] = bg
+    return out
+
+
+def object_outline(g, color, conn=4, keep=False):
+    """Paint the outline of every object in `color`: background-neighbouring (or
+    grid-edge) object cells.  With keep=False only the outlines survive."""
+    bg = _bg(g)
+    h, w = len(g), len(g[0])
+    nbrs = ((-1, 0), (1, 0), (0, -1), (0, 1)) if conn == 4 else \
+           ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1))
+    out = [list(row) for row in g] if keep else [[bg] * w for _ in range(h)]
+    for r in range(h):
+        for c in range(w):
+            if g[r][c] == bg:
+                continue
+            edge = False
+            for dr, dc in nbrs:
+                nr, nc = r + dr, c + dc
+                if not (0 <= nr < h and 0 <= nc < w) or g[nr][nc] == bg:
+                    edge = True
+                    break
+            if edge:
+                out[r][c] = color
+    return out
+
+
+def crop_then_scale(g, k):
+    """Crop to the bounding box of the content, then scale by k."""
+    sub = crop_to_bbox(g)
+    if not sub or not sub[0]:
+        return [list(row) for row in g]
+    out = []
+    for row in sub:
+        big = []
+        for v in row:
+            big.extend([v] * k)
+        for _ in range(k):
+            out.append(list(big))
+    return out
+
+
 # ---------------------------------------------------------------- program search
 
 # A "program" is a closed-over function grid -> grid.  Search enumerates programs
@@ -981,13 +1319,55 @@ def _anchor(g, h, w, bg=0):
     return None
 
 
-def _enumerate_depth1(in0, out0, fast=False):
+def _enumerate_learned_maps(in0, out0):
+    """The primitives that *induce a colour map from this (in0, out0) pair*.
+
+    They are split out of `_enumerate_depth1` for two reasons.  Semantically, a
+    map fitted to an intermediate grid reproduces the first example by
+    construction, so its agreement is weak evidence and the search prefers
+    explanations that do not re-learn a palette; keeping them in a separate
+    generator lets the search take a cheap second pass over them instead of
+    re-running the whole primitive sweep.  Practically, that second pass is then
+    nearly free, which is what keeps the composed search affordable."""
+    h, w = len(in0), len(in0[0])
+    H, W = len(out0), len(out0[0])
+    if (h, w) != (H, W):
+        return
+    target = _tup(out0)
+    bg = _bg(in0)
+    # recolor whole objects by their size (numerosity -> color)
+    mapping = _infer_size_colors(in0, out0, bg)
+    if mapping and _tup(recolor_by_size(in0, mapping)) == target:
+        yield ('recolor_by_size', (lambda m: lambda g: recolor_by_size(g, m))(mapping))
+    # recolor whole objects by the *rank* of their size.  The palette is induced
+    # from this example and verified on every example, so a rank rule survives
+    # examples whose size sets differ (which a size->color map cannot).
+    for order in ('desc', 'asc'):
+        pal = _size_rank_palette(in0, out0, bg, order)
+        if pal and _tup(recolor_by_size_rank(in0, pal, order)) == target:
+            yield ('recolor_by_rank_' + order,
+                   (lambda p, o: lambda g: recolor_by_size_rank(g, p, o))(pal, order))
+    # global palette permutation (learned from in0 -> out0)
+    mapping = _infer_recolor_map(in0, out0)
+    if mapping and len(mapping) > 1 and _tup(recolor_map(in0, mapping)) == target:
+        yield ('recolor_map', (lambda m: lambda g: recolor_map(g, m))(mapping))
+
+
+def _enumerate_depth1(in0, out0, fast=False, allow_learned=True):
     """Enumerate every single primitive mapping in0 -> out0.
 
     With fast=True the two expensive parameter sweeps (translation, recolor) use
     a single closed-form candidate instead of a full scan; this is exact except
     for the rare case where a translation clips the anchor cell, so it is used
-    only for the final step of depth-3 search, never for depth-1."""
+    only for the final step of depth-3 search, never for depth-1.
+
+    With allow_learned=False the primitives that *learn a colour map from this
+    (in0, out0) pair* are skipped.  That matters for composed programs: a learned
+    map applied to an arbitrary intermediate reproduces the first example by
+    construction, so its agreement carries no evidence, and it opens a large space
+    of degenerate two-step explanations (`recolor(0->2)` then a re-learned rank
+    palette, say).  Those primitives stay available at depth 1, where the pair is
+    a real training example."""
     h, w = len(in0), len(in0[0])
     H, W = len(out0), len(out0[0])
     target = _tup(out0)
@@ -1102,6 +1482,16 @@ def _enumerate_depth1(in0, out0, fast=False):
             if _tup(gravity(in0, d)) == target:
                 yield ('gravity_' + d, (lambda dd: lambda g: gravity(g, dd))(d))
 
+    # gravity of a single color (others stay put) — color-preserving
+    if (h, w) == (H, W) and cdiff == 0:
+        for d in ('down', 'up', 'left', 'right'):
+            for c in cols:
+                if c == bg:
+                    continue
+                if _tup(gravity_color(in0, c, d)) == target:
+                    yield ('gravity_color(%d,%s)' % (c, d),
+                           (lambda cc, dd: lambda g: gravity_color(g, cc, dd))(c, d))
+
     # mirror completion (size-preserving) — color-preserving
     if (h, w) == (H, W) and cdiff == 0:
         for ax in ('h', 'v'):
@@ -1167,18 +1557,6 @@ def _enumerate_depth1(in0, out0, fast=False):
         for key in ('largest', 'smallest'):
             if _tup(remove_component(in0, key)) == target:
                 yield ('remove_' + key, (lambda k: lambda g: remove_component(g, k))(key))
-
-    # recolor whole objects by their size (numerosity -> color)
-    if (h, w) == (H, W):
-        mapping = _infer_size_colors(in0, out0, bg)
-        if mapping and _tup(recolor_by_size(in0, mapping)) == target:
-            yield ('recolor_by_size', (lambda m: lambda g: recolor_by_size(g, m))(mapping))
-
-    # global palette permutation (learned from in0 -> out0)
-    if (h, w) == (H, W):
-        mapping = _infer_recolor_map(in0, out0)
-        if mapping and len(mapping) > 1 and _tup(recolor_map(in0, mapping)) == target:
-            yield ('recolor_map', (lambda m: lambda g: recolor_map(g, m))(mapping))
 
     # border painting (size-preserving)
     if (h, w) == (H, W):
@@ -1251,6 +1629,64 @@ def _enumerate_depth1(in0, out0, fast=False):
                 yield ('draw_object_cross(%d)' % c,
                        (lambda cc: lambda g: draw_object_cross(g, cc))(c))
 
+    # ---- v8: layout (panels / quadrants), symmetry tiling, denoise, outlines
+
+    # 2x2 layout: mirror tiling grows the grid to 2H x 2W
+    if H == 2 * h and W == 2 * w:
+        for mode in ('both', 'mirror_h', 'mirror_v', 'replicate'):
+            if _tup(mirror_tile(in0, mode)) == target:
+                yield ('mirror_tile_' + mode, (lambda m: lambda g: mirror_tile(g, m))(mode))
+
+    # 2x2 layout as a logical combination or overlay of the four quadrants
+    if (h, w) == (H, W) and cdiff == 0:
+        for op in ('or', 'xor', 'and', 'majority'):
+            if _tup(quad_combine(in0, op)) == target:
+                yield ('quad_' + op, (lambda o: lambda g: quad_combine(g, o))(op))
+        for order in ((3, 2, 1), (1, 2, 3), (2, 3, 1), (0, 1, 2, 3)):
+            if _tup(quad_overlay(in0, order)) == target:
+                yield ('quad_overlay_%d%d%d%d' % (order if len(order) == 4 else order + (0,)),
+                       (lambda o: lambda g: quad_overlay(g, o))(order))
+
+    # separator-delimited panels: combine equal-shaped panels cellwise.  The
+    # separator colour is swept, because the delimiter is as often a distinct
+    # colour as it is the background.
+    if (h, w) == (H, W) and cdiff == 0:
+        for sep in _colors(in0):
+            for op in ('or', 'xor', 'majority', 'and'):
+                if _tup(panel_combine(in0, op, sep)) == target:
+                    yield ('panels_%s(%d)' % (op, sep),
+                           (lambda o, s: lambda g: panel_combine(g, o, s))(op, sep))
+
+    # strip the uniform separator rows/columns (shrinks)
+    for sep in _colors(in0):
+        rs = remove_separator(in0, sep)
+        if _tup(rs) == target and (len(rs), len(rs[0])) != (h, w):
+            yield ('remove_separator(%d)' % sep, (lambda s: lambda g: remove_separator(g, s))(sep))
+
+    # point-symmetry completion
+    if (h, w) == (H, W) and cdiff == 0 and _tup(mirror_point(in0)) == target:
+        yield ('mirror_hv', lambda g: mirror_point(g))
+
+    # denoise: erase cells with no non-background neighbour
+    if (h, w) == (H, W) and _tup(remove_isolated(in0)) == target:
+        yield ('remove_isolated', lambda g: remove_isolated(g))
+
+    # per-object outlines (size-preserving, adds at most one color)
+    if (h, w) == (H, W) and cdiff <= 1:
+        for c in _colors(out0):
+            for conn in (4, 8):
+                if _tup(object_outline(in0, c, conn)) == target:
+                    yield ('object_outline_%d(%d)' % (conn, c),
+                           (lambda cc, cn: lambda g: object_outline(g, cc, cn))(c, conn))
+                if _tup(object_outline(in0, c, conn, True)) == target:
+                    yield ('object_outline_%d_keep(%d)' % (conn, c),
+                           (lambda cc, cn: lambda g: object_outline(g, cc, cn, True))(c, conn))
+
+    # crop to the content bounding box, then scale
+    for k in (2, 3):
+        if _tup(crop_then_scale(in0, k)) == target:
+            yield ('crop_then_scale(%d)' % k, (lambda kk: lambda g: crop_then_scale(g, kk))(k))
+
     # crop to the top-left corner at output size.  A 1x1 crop is just 'return the
     # corner cell', a degenerate rule that spuriously fits single-cell-output
     # tasks, so it is excluded; the single-cell numerosity primitives below are the
@@ -1275,6 +1711,10 @@ def _enumerate_depth1(in0, out0, fast=False):
             yield ('count_diag(%d)' % color, (lambda cc: lambda g: count_diag(g, cc))(color))
 
     # (single-cell numerosity is tried earlier, before the degenerate crop rules)
+
+    if allow_learned:
+        for name, prog in _enumerate_learned_maps(in0, out0):
+            yield (name, prog)
 
 
 def _unconditional_transitions(g):
@@ -1305,6 +1745,11 @@ def _unconditional_transitions(g):
         yield ('fill_holes(%d)' % c, (lambda cc: lambda x: fill_holes(x, cc))(c))
     for d in ('down', 'up', 'left', 'right'):
         yield ('gravity_' + d, (lambda dd: lambda x: gravity(x, dd))(d))
+    for d in ('down', 'up', 'left', 'right'):
+        for c in cols:
+            if c != bg:
+                yield ('gravity_color(%d,%s)' % (c, d),
+                       (lambda cc, dd: lambda x: gravity_color(x, cc, dd))(c, d))
     for ax in ('h', 'v'):
         yield ('mirror_' + ax, (lambda a: lambda x: mirror_union(x, a))(ax))
     yield ('connect', lambda x: connect_points(x))
@@ -1333,6 +1778,18 @@ def _unconditional_transitions(g):
     for which in ('main', 'anti', 'both'):
         yield ('remove_diag_' + which, (lambda q: lambda x: remove_diag(x, q))(which))
     yield ('checkerboard', lambda x: checkerboard(x))
+    # v8 layout / symmetry / denoise primitives (all size-preserving here)
+    yield ('mirror_hv', lambda x: mirror_point(x))
+    yield ('remove_isolated', lambda x: remove_isolated(x))
+    for op in ('or', 'xor', 'and', 'majority'):
+        yield ('quad_' + op, (lambda o: lambda x: quad_combine(x, o))(op))
+        for sep in cols:
+            yield ('panels_%s(%d)' % (op, sep),
+                   (lambda o, s: lambda x: panel_combine(x, o, s))(op, sep))
+    for order in ((3, 2, 1), (1, 2, 3), (2, 3, 1)):
+        yield ('quad_overlay_%d%d%d' % order,
+               (lambda o: lambda x: quad_overlay(x, o))(order))
+    yield ('remove_separator(0)', lambda x: remove_separator(x, 0))
     for c in range(10):
         yield ('fill_uniform_rows(%d)' % c, (lambda cc: lambda x: fill_uniform_rows(x, cc))(c))
         yield ('fill_uniform_cols(%d)' % c, (lambda cc: lambda x: fill_uniform_cols(x, cc))(c))
@@ -1406,9 +1863,9 @@ def find_program(train, max_depth=2, beam=16):
         return lambda g: recolor_map(g, mapping)
 
     # depth 2: f1 (unconditional) then f2 (target-matched)
-    g1_list = []  # (closeness, f1) for the beam that feeds depth 3
     if max_depth < 2:
         return None
+    g1_entries = []  # (name, f1, g1, size-compatible) — built once, reused below
     seen_g1 = set()
     for f1name, f1 in _unconditional_transitions(in0):
         g1 = f1(in0)
@@ -1416,17 +1873,31 @@ def find_program(train, max_depth=2, beam=16):
         if k1 in seen_g1:
             continue
         seen_g1.add(k1)
-        g1_list.append((_closeness(g1, out0), f1))
-        if not _size_compatible(g1, out0):
-            continue
-        for f2name, f2 in _enumerate_depth1(g1, out0):
-            prog = _compose(f2, f1)
-            if _verify(prog, train):
-                return prog
+        g1_entries.append((f1name, f1, g1, _size_compatible(g1, out0)))
+
+    # Two passes.  A *learned* colour map as the second step (recolor_by_size /
+    # recolor_by_rank / recolor_map) is fitted to the intermediate grid, so it
+    # reproduces the first example by construction and its agreement is weak
+    # evidence; after a pure colour change it is outright redundant (the
+    # composition is just that map on the original).  Pass 1 therefore searches
+    # only the explanations that do not re-learn a palette, and pass 2 admits them
+    # as a fallback.  Both passes verify against every training example, so this
+    # changes only which verified program is preferred, never whether one is.
+    for learned_pass in (False, True):
+        for f1name, f1, g1, size_ok in g1_entries:
+            if not size_ok:
+                continue
+            f2s = _enumerate_learned_maps(g1, out0) if learned_pass \
+                else _enumerate_depth1(g1, out0, allow_learned=False)
+            for f2name, f2 in f2s:
+                prog = _compose(f2, f1)
+                if _verify(prog, train):
+                    return prog
 
     # depth 3: f1 then f2 then f3, from the beam of closest g1
     if max_depth >= 3:
-        g1_list.sort(key=lambda t: t[0])
+        g1_list = sorted(((_closeness(g1, out0), f1)
+                          for _, f1, g1, _ in g1_entries), key=lambda t: t[0])
         seen_g2 = set()  # global dedup: many (f1, f2) pairs reach the same grid
         for _, f1 in g1_list[:beam]:
             g1 = f1(in0)
@@ -1443,7 +1914,7 @@ def find_program(train, max_depth=2, beam=16):
                     continue
                 if not _size_compatible(g2, out0):
                     continue
-                for f3name, f3 in _enumerate_depth1(g2, out0, fast=True):
+                for f3name, f3 in _enumerate_depth1(g2, out0, fast=True, allow_learned=True):
                     prog = _compose(f3, _compose(f2, f1))
                     if _verify(prog, train):
                         return prog

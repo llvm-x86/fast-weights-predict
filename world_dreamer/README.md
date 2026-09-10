@@ -294,6 +294,11 @@ fast-weight matrix.
 - `pursuit.py` — the continuous instantiation (BDH fast weights + shooting).
 - `arc.py` — the discrete instantiation (program induction + program search).
 - `eval_arc.py` — ARC evaluation harness (parallel; pass the core count, e.g. 8).
+  This is the authoritative measurement; the two below are triage tooling.
+- `sample_eval.py` — seeded fixed-sample scoring, for comparing solver variants
+  quickly (a triage signal only — it can miss a variant's gain entirely).
+- `variant.py` — spawn isolated copies of the tree for concurrent experiments,
+  score them on the fixed sample, and diff them against the canonical solver.
 - `llm_dreamer.py` — the LLM-as-dreamer demonstration (induced, verified rules).
 - `learned.py` — the non-LLM learned fast-weight substrate (BDH on ARC grids).
 - `combined.py` — the faithful ensemble: induced program first, learned patch map fallback.

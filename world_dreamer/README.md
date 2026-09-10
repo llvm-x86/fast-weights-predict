@@ -107,10 +107,16 @@ Two search details are worth stating because they decide results:
   preferred over one that only reaches it by re-colouring. Both passes verify
   against every training example, so this changes *which* verified program is
   returned, never *whether* one is.
-- **The size gate.** An intermediate grid is only expanded if a single primitive
-  could plausibly take it to the target size; that gate now also admits the crop
-  family (`crop_to_bbox`, `crop_component`, `crop_topleft`), which can shrink to
-  an arbitrary size, instead of only the divisible/equal-axis cases.
+- **The size gate, and why it is gone.** An intermediate grid used to be expanded
+  only if a single primitive could plausibly take it to the target size. That
+  filter is unsound: `tile_2d` re-tiles the detected row/column period to
+  *exactly* the target size from any input, so the reachable size-relation set is
+  universal and the only complete filter is no filter. An audit over both
+  training sets checked 256,551 distinct intermediates, found the gate rejecting
+  2.2% of them, and re-ran **all 1,211** unsolved training tasks with the gate
+  forced open: none became solvable, so the fix is score-neutral — but it is the
+  difference between a search that is complete with respect to its primitive
+  library and one that is not, and dropping the gate measured 0.98x, i.e. free.
 
 The dreamer is a **program-composition search**: depth-1 primitives, plus
 depth-2 and depth-3 compositions `f3 ∘ f2 ∘ f1` where intermediate steps are
@@ -282,10 +288,27 @@ the full-training-set cell error, because leave-one-out alone rewards a model
 that predicts "almost the input". Measured honestly on the same-size subset
 (size-changing tasks are reported as skipped, not hidden):
 
-| benchmark | same-size tasks | solved |
-|---|---|---|
-| ARC-AGI-1 | 129 | **10 (7.8%)** |
-| ARC-AGI-2 | 257 | **11 (4.3%)** |
+| benchmark | same-size tasks | solved (same-size) | solved (all tasks) |
+|---|---|---|---|
+| ARC-AGI-1 | 130 | **15 (11.5%)** | **15 / 400 (3.8%)** |
+| ARC-AGI-2 | 258 | **17 (6.6%)** | **17 / 1,000 (1.7%)** |
+
+A second, **object-level** memory was then added, and it is the honest answer to
+"can an associative memory do ARC". It decomposes the input into objects, keys
+each by its (translation- and optionally dihedral-invariant) tight subgrid, learns
+the output object together with its *relative offset*, and paints it back — so
+this model is not restricted to same-size tasks. An unseen key leaves that object
+untouched, and a size-changing task is answered only when the memory reproduces
+**every** training pair exactly both full-fit and leave-one-out. The measured
+reason its contribution is small is the interesting part: 72 of 129 same-size and
+74 of 271 size-changing training tasks are reproduced *perfectly* on the full
+training fit, but only 5 and 1 survive leave-one-out — the rest are memorizers
+whose held-out object never recurs. Over half the failing objects have a
+never-seen key, and of the 74 size-changing tasks whose answer is a single object,
+none has an object patch that recurs across leave-one-out folds. Dropping the
+leave-one-out gate would take the learned model from 15 to 18 on ARC-AGI-1
+training while answering 270 tasks wrongly, so the gate stays: the "pick the odd
+object out" family is structurally out of reach for a lookup table.
 
 The patch memory is what lifts the number: it expresses the *local* ARC family
 (cellular automata, region fill, symmetry completion) that neither the
@@ -294,11 +317,13 @@ digits, and that is the honest point: an associative memory — even a patch-lev
 one — cannot induce the compositional relational rules that are most of ARC, and
 it adds nothing at all on either evaluation set. As the DSL has grown, the
 overlap between the two has grown with it: the learned model now contributes
-eight tasks that no induced program reaches
-(`0ca9ddb6`, `4258a5f9`, `a8d7556c`, `a9f96cdd`, `b60334d2`, `b6afb2da`,
-`ce22a75a`, `d364b489`) — up from two, after the patch memory gained
-edge-reflecting padding, dihedral-shared patch keys and a selection score that
-also punishes overfitting the training pair. One task it used to own,
+ten tasks that no induced program reaches on ARC-AGI-1 training and eleven on
+ARC-AGI-2 (`0ca9ddb6`, `4258a5f9`, `a8d7556c`, `a9f96cdd`, `b60334d2`,
+`b6afb2da`, `ce22a75a`, `d364b489`, `5c0a986e`, `6c434453`, plus `ad38a9d0` on
+ARC-AGI-2) — up from two, after the patch memory gained
+edge-reflecting padding, dihedral-shared patch keys, a selection score that also
+punishes overfitting the training pair, and the object-level memory above. On
+**both evaluation sets it still adds exactly zero**. One task it used to own,
 `543a7ed5`, is traded away in return; its correct model has strictly worse
 held-out error, and no weighting recovers it without losing two others.
 
@@ -311,8 +336,8 @@ verifies. Measured as a union on the held-out test:
 
 | benchmark | DSL alone | learned alone | **combined** |
 |---|---|---|---|
-| ARC-AGI-1 | 83 / 400 (20.8%) | 10 / 129 (7.8%) | **91 / 400 (22.8%)** |
-| ARC-AGI-2 | 106 / 1,000 (10.6%) | 11 / 257 (4.3%) | **114 / 1,000 (11.4%)** |
+| ARC-AGI-1 | 83 / 400 (20.8%) | 15 / 400 (3.8%) | **93 / 400 (23.2%)** |
+| ARC-AGI-2 | 106 / 1,000 (10.6%) | 17 / 1,000 (1.7%) | **117 / 1,000 (11.7%)** |
 
 The same point holds when the dreamer is *automated*: `verify_solution.py` runs a
 language-model proposer (a solver agent per task) against the verifier. On an

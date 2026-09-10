@@ -2119,20 +2119,29 @@ def _verify(prog, train):
 
 
 def _size_compatible(g, out0):
-    """Can g reach out0's dimensions in one primitive?"""
-    h, w = len(g), len(g[0])
-    H, W = len(out0), len(out0[0])
-    if (h, w) == (H, W):
-        return True
-    if H % h == 0 and W % w == 0:
-        return True  # tile / scale / self-substitute imply divisibility
-    if w == W:
-        return True  # extend_rows: any height, width fixed
-    if h == H:
-        return True  # extend_cols: any width, height fixed
-    if H <= h and W <= w:
-        return True  # crop_to_bbox / crop_component / crop_topleft can shrink
-    return False
+    """Can g reach out0's dimensions in one primitive?
+
+    Always yes.  The old guard admitted only equal size, divisible dims,
+    w == W (extend_rows), h == H (extend_cols) and shrink (H <= h, W <= w),
+    but that set is NOT complete with respect to `_enumerate_depth1`:
+
+      * `tile_2d` re-tiles the detected row/column period to *exactly* H x W
+        from any input, so it realises every (h, w) -> (H, W) relation (the
+        only exclusion, a 1x1 output, is admitted by the shrink branch);
+      * `crop_then_scale(k)` crops to the content bbox (h' x w', h' <= h,
+        w' <= w) and scales by k in {2, 3}, so it realises H = k*h',
+        W = k*w' — e.g. (3, 3) -> (4, 4), which the old guard rejected;
+      * `count_row` / `count_col` / `count_diag` output `ncomp` (1 x n,
+        n x 1, n x n) where `ncomp` is the number of 4-connected components
+        and can exceed h or w, so e.g. (5, 5) -> (1, 13) was rejected.
+
+    Because `tile_2d` makes the reachable relation set universal, the only
+    sound and complete filter is "no filter"; a synthetic task built as
+    `recolor(tile_2d(in0, 3, 3))` is solved ungated and missed gated.  The
+    gate only ever rejected 5702 of 256551 distinct g1 over the two training
+    sets and a paired re-run (80 unsolved tasks) measured the ungated search
+    at 0.98x its gated cost, so dropping it is free."""
+    return True
 
 
 def _closeness(g, out0):

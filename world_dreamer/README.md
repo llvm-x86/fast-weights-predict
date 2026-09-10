@@ -81,6 +81,21 @@ primitive library covers two kinds of transformation:
   first example and then verified on all of them (a rank rule survives examples
   whose size sets differ, which a size→colour map cannot).
 
+- **a generic per-object operator** (v9) — `map_objects(f)` applies a
+  size-preserving primitive `f` to *every object's own bounding-box subgrid* and
+  writes it back in place. `map_flip`/`map_rotate` were the two hand-written
+  special cases of this; opening it up makes per-object gravity, per-object
+  mirror and point completion, per-object cross and diagonal carving, and
+  dilation expressible for the first time, from one operator plus 25 inner
+  primitives. It is the generic form of ARC's largest family, "apply this
+  transformation to every shape";
+- **panel reordering** (v9) — sort the separator-delimited panels of a grid by
+  their content (cell count, sum, lexicographic order, distinct colours, ascending
+  or descending) and write them back into the slots they came from. The layout
+  carries no information and only the *order* of the panels is the answer. Unlike
+  the crop-by-property families, this selects nothing — it is a total permutation
+  of the panels in fixed slots, so it cannot be right for the wrong reason.
+
 Two search details are worth stating because they decide results:
 
 - **Which hypothesis wins.** Several distinct primitives can reproduce every
@@ -138,16 +153,16 @@ datasets, and only the variants that survive are re-measured on the full sets.
 
 | search depth | ARC-AGI-1 | ARC-AGI-2 |
 |---|---|---|
-| depth-1 | 56 / 400 (14.0%) | 61 / 1,000 (6.1%) |
-| depth-2 (default) | **82 / 400 (20.5%)** | **102 / 1,000 (10.2%)** |
+| depth-1 | 56 / 400 (14.0%) | 63 / 1,000 (6.3%) |
+| depth-2 (default) | **83 / 400 (20.8%)** | **106 / 1,000 (10.6%)** |
 
 <p></p>
 
 | dataset | solved | fits every training example but misses the test |
 |---|---|---|
-| ARC-AGI-1 training | 82 / 400 | 2 |
-| ARC-AGI-2 training | 102 / 1,000 | 4 |
-| ARC-AGI-1 evaluation | 21 / 400 | 0 |
+| ARC-AGI-1 training | 83 / 400 | 2 |
+| ARC-AGI-2 training | 106 / 1,000 | 4 |
+| ARC-AGI-1 evaluation | 24 / 400 | 0 |
 | ARC-AGI-2 evaluation | 0 / 120 | 0 |
 
 The last column is reported deliberately. A program that reproduces *every*
@@ -172,11 +187,35 @@ single-cell numerosity and connect-with-new-color rules, the v6/v7 rectangle
 construction (`draw_bbox_outline`/`map_bbox_outline`/`fill_bbox_region`/
 `map_bbox_fill`/`draw_object_cross`), and the v8 layout rules (mirror tiling,
 quadrant logic, separator panels, point-symmetry completion, per-object outlines,
-rank recolouring) — plus two-step combinations of them). The other ~318
-tasks are compositional, relational, numerosity, and sequence-extrapolation
-tasks that a hand-written primitive DSL with shallow search does not reach —
+rank recolouring), and the v9 operators below — plus two-step combinations of
+them). The other ~317 tasks are compositional, relational, numerosity, and
+sequence-extrapolation tasks that a hand-written primitive DSL with shallow
+search does not reach —
 which is precisely where ARC's difficulty lies, and where the ARC-AGI-3 frontier
 (symbolic world modeling / program search at scale) is aimed.
+
+### Why the evaluation sets fail: a capability gap, not a search failure
+
+This is worth separating, because the two failures call for completely different
+fixes. For every task the solver gets wrong on either evaluation set, we asked a
+sharper question than "is it solved": **is there any depth-1 primitive that
+reproduces the output of every training example?** If yes, the search found a
+hypothesis and the task is an *ambiguity* failure (the examples do not pin the
+rule down). If no, it is a *capability* failure (the DSL cannot express the rule
+at all, and depth-2 cannot help, since it composes the same primitives).
+
+| evaluation set | solved | unsolved | …with a train-fitting depth-1 primitive |
+|---|---|---|---|
+| ARC-AGI-1 | 24 | 376 | **0** |
+| ARC-AGI-2 | 0 | 120 | **0** |
+
+Not one. Every remaining failure is a rule the primitive library cannot express,
+not a rule the search failed to find. That is the honest reading of these
+numbers, and it is also why the training-set rate is four times the evaluation
+rate: the training sets contain many tasks whose rule *is* in the library, and
+the evaluation sets were built to exclude exactly those. Adding more hand-written
+primitives to this DSL is therefore not the lever — the discussion below is about
+what is.
 
 ### Does it generalize to ARC-AGI-2? (honest, measured)
 
@@ -191,7 +230,7 @@ are aimed at that core and recover a growing handful of tasks, but the
 composition/relation core remains out of reach for a shallow hand-written DSL.
 
 **On the held-out *evaluation* sets (the real benchmarks) the combined system
-scores 21 / 400 (5.2%) on ARC-AGI-1 and 0 / 120 (0.0%) on ARC-AGI-2.** The 21
+scores 24 / 400 (6.0%) on ARC-AGI-1 and 0 / 120 (0.0%) on ARC-AGI-2.** The 24
 ARC-AGI-1 solves come from the hand-written DSL; the learned patch memory
 contributes **zero** to either evaluation set. These are the numbers that answer
 the "does it generalize" question, and the answer is: barely on ARC-AGI-1 and
@@ -231,28 +270,37 @@ Hebbian outer product `W ← W + η ψ(output) φ(input)ᵀ`; the readout is the
 map plus an argmax color per cell (computed without materializing the dense
 matrix).
 
-Three fast-weight world models are learned — a position-bound map, a
-position-invariant color map, and (v2) a **3×3 patch associative memory**
+Seven fast-weight world models are learned — a position-bound map, a global
+color-cooccurrence map, and five geometries of a **3×3 patch associative memory**
 (`LocalRuleModel`) that keys on the local input neighborhood instead of a single
-cell, so a rule learned at one location generalizes to every location — and the
-*dreamer* selects the one that generalizes best by leave-one-out error on the
-training set (so a model that merely memorizes is rejected). Measured honestly on
-the same-size subset (size-changing tasks are reported as skipped, not hidden):
+cell, so a rule learned at one location generalizes to every location. Three
+details matter and each was measured: patches on the grid border **reflect the
+grid across the edge** rather than reading a sentinel, so border patches hold
+real colors; a patch and its eight dihedral transforms **share vote counts**; and
+the *dreamer* selects among the seven by leave-one-*example*-out cell error plus
+the full-training-set cell error, because leave-one-out alone rewards a model
+that predicts "almost the input". Measured honestly on the same-size subset
+(size-changing tasks are reported as skipped, not hidden):
 
 | benchmark | same-size tasks | solved |
 |---|---|---|
-| ARC-AGI-1 | 129 | **4 (3.1%)** |
-| ARC-AGI-2 | 257 | **2 (0.8%)** |
+| ARC-AGI-1 | 129 | **10 (7.8%)** |
+| ARC-AGI-2 | 257 | **11 (4.3%)** |
 
 The patch memory is what lifts the number: it expresses the *local* ARC family
 (cellular automata, region fill, symmetry completion) that neither the
-position-bound map nor the global color map can reach. It is still single digits,
-and that is the honest point: an associative memory — even a patch-level one —
-cannot induce the compositional relational rules that are most of ARC. As the DSL
-has grown, the overlap between the two has grown with it: the learned model now
-contributes just two tasks that no induced program reaches (`543a7ed5`,
-`b6afb2da`), and `3618c87e` — one of the three it used to own — is now solved by
-a DSL primitive (`gravity_color`).
+position-bound map nor the global color map can reach. It is still single
+digits, and that is the honest point: an associative memory — even a patch-level
+one — cannot induce the compositional relational rules that are most of ARC, and
+it adds nothing at all on either evaluation set. As the DSL has grown, the
+overlap between the two has grown with it: the learned model now contributes
+eight tasks that no induced program reaches
+(`0ca9ddb6`, `4258a5f9`, `a8d7556c`, `a9f96cdd`, `b60334d2`, `b6afb2da`,
+`ce22a75a`, `d364b489`) — up from two, after the patch memory gained
+edge-reflecting padding, dihedral-shared patch keys and a selection score that
+also punishes overfitting the training pair. One task it used to own,
+`543a7ed5`, is traded away in return; its correct model has strictly worse
+held-out error, and no weighting recovers it without losing two others.
 
 ### The combined substrate — `combined.py`
 
@@ -263,8 +311,8 @@ verifies. Measured as a union on the held-out test:
 
 | benchmark | DSL alone | learned alone | **combined** |
 |---|---|---|---|
-| ARC-AGI-1 | 82 / 400 (20.5%) | 4 / 129 (3.1%) | **84 / 400 (21.0%)** |
-| ARC-AGI-2 | 102 / 1,000 (10.2%) | 2 / 257 (0.8%) | **102 / 1,000 (10.2%)** |
+| ARC-AGI-1 | 83 / 400 (20.8%) | 10 / 129 (7.8%) | **91 / 400 (22.8%)** |
+| ARC-AGI-2 | 106 / 1,000 (10.6%) | 11 / 257 (4.3%) | **114 / 1,000 (11.4%)** |
 
 The same point holds when the dreamer is *automated*: `verify_solution.py` runs a
 language-model proposer (a solver agent per task) against the verifier. On an

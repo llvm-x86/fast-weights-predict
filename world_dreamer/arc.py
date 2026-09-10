@@ -631,6 +631,132 @@ def map_rotate(g, k):
     return out
 
 
+def map_objects(g, f, conn=4):
+    """Apply a primitive `f` to every object's own bounding-box subgrid and write
+    the transformed subgrid back in place — the *generic* form of ARC's largest
+    family, 'apply this transformation to every shape'.  `map_flip`/`map_rotate`
+    are the hand-written special cases of this operator; opening it up lets the
+    search reach per-object gravity, per-object mirror/point completion, per-object
+    cross/diagonal carving and dilation, none of which was expressible before.
+
+    The inner primitive must be size-preserving on the subgrid, which is what makes
+    the in-place write-back legal.  A subgrid whose transformed size differs — and
+    any empty or 1x1 grid — leaves the whole grid unchanged and simply fails
+    verification rather than raising, the same convention as `map_flip`/`map_rotate`
+    (a non-square object simply cannot be transposed in place).  The subgrid is
+    filled with the grid background colour and only this object's cells, exactly as
+    `map_flip` builds it."""
+    if not g or not g[0] or (len(g) == 1 and len(g[0]) == 1):
+        return [list(row) for row in g]
+    bg = _bg(g)
+    comps = _components(g, bg) if conn == 4 else _components8(g, bg)
+    if not comps:
+        return [list(row) for row in g]
+    out = [list(row) for row in g]
+    for color, cells in comps:
+        rs = [r for r, _ in cells]
+        cs = [c for _, c in cells]
+        r0, c0, r1, c1 = min(rs), min(cs), max(rs), max(cs)
+        bh, bw = r1 - r0 + 1, c1 - c0 + 1
+        sub = [[bg] * bw for _ in range(bh)]
+        for r, c in cells:
+            sub[r - r0][c - c0] = color
+        t = f(sub)
+        if not t or not t[0] or len(t) != bh or len(t[0]) != bw:
+            return [list(row) for row in g]
+        for r in range(bh):
+            orow = out[r0 + r]
+            trow = t[r]
+            for c in range(bw):
+                orow[c0 + c] = trow[c]
+    return out
+
+
+def _map_objects_batch(g, inners, conn=4):
+    """Batched form of `map_objects`: run every inner in `inners` over ONE shared
+    extraction (one background scan, one component decomposition, one subgrid per
+    object) and return [(name, f, transformed_grid), ...].
+
+    `_enumerate_depth1` is called once per intermediate grid of the composed
+    search, so it is on the hot path; sharing the extraction there is what keeps
+    the generic operator affordable.  The result is exactly what calling
+    `map_objects(g, f)` per inner would give, including the 'a subgrid whose size
+    changed leaves the whole grid unchanged' rule."""
+    base = [list(row) for row in g]
+    if not g or not g[0] or (len(g) == 1 and len(g[0]) == 1):
+        return [(n, f, [list(r) for r in base]) for n, f in inners]
+    bg = _bg(g)
+    comps = _components(g, bg) if conn == 4 else _components8(g, bg)
+    if not comps:
+        return [(n, f, [list(r) for r in base]) for n, f in inners]
+    boxes = []
+    for color, cells in comps:
+        rs = [r for r, _ in cells]
+        cs = [c for _, c in cells]
+        r0, c0, r1, c1 = min(rs), min(cs), max(rs), max(cs)
+        bh, bw = r1 - r0 + 1, c1 - c0 + 1
+        sub = [[bg] * bw for _ in range(bh)]
+        for r, c in cells:
+            sub[r - r0][c - c0] = color
+        boxes.append((r0, c0, bh, bw, sub))
+    results = []
+    for name, f in inners:
+        out = None
+        for r0, c0, bh, bw, sub in boxes:
+            t = f(sub)
+            if not t or not t[0] or len(t) != bh or len(t[0]) != bw:
+                out = None  # a box changed size: the whole grid is unchanged
+                break
+            if out is None:
+                out = [list(row) for row in base]
+            for r in range(bh):
+                orow = out[r0 + r]
+                trow = t[r]
+                for c in range(bw):
+                    orow[c0 + c] = trow[c]
+        if out is None:
+            out = [list(r) for r in base]
+        results.append((name, f, out))
+    return results
+
+
+def _map_object_inners():
+    """The bounded, deliberate set of inner primitives fed to `map_objects`.
+
+    Every one is size-preserving on a subgrid, which is the precondition for the
+    in-place write-back.  The set is grouped by the ARC family it expresses *per
+    object*:
+      * the cell permutations the DSL already hand-writes as `map_flip` /
+        `map_rotate` — kept for completeness (they reproduce those grids exactly,
+        so they dedup against them in the composed search); `main`/`anti` are new,
+        `map_flip` was only wired for `h`/`v`;
+      * gravity inside each object's own box ('each shape settles in its box');
+      * mirror / point-symmetry completion of each object inside its box;
+      * carving the cross / diagonals, or keeping the centre row/column, through
+        each object's box centre;
+      * dilation of each object.
+    Primitives that are identity on a tight bounding box (crop_to_bbox,
+    remove_isolated, connect_points, ...) are deliberately excluded: they cannot
+    change any object, so they would only cost search time."""
+    for ax in ('h', 'v', 'main', 'anti'):
+        yield ('flip_' + ax, (lambda a: lambda s: flip(s, a))(ax))
+    for k in (1, 2, 3):
+        yield ('rotate%d' % (90 * k), (lambda kk: lambda s: rotate(s, kk))(k))
+    for d in ('down', 'up', 'left', 'right'):
+        yield ('gravity_' + d, (lambda dd: lambda s: gravity(s, dd))(d))
+    for ax in ('h', 'v'):
+        yield ('mirror_' + ax, (lambda a: lambda s: mirror_union(s, a))(ax))
+    yield ('mirror_hv', lambda s: mirror_point(s))
+    yield ('dilate', lambda s: dilate(s))
+    yield ('keep_cross', lambda s: keep_cross(s))
+    yield ('remove_cross', lambda s: remove_cross(s))
+    yield ('keep_mid_row', lambda s: keep_mid_row(s))
+    yield ('keep_mid_col', lambda s: keep_mid_col(s))
+    for which in ('main', 'anti', 'both'):
+        yield ('keep_diag_' + which, (lambda q: lambda s: keep_diag(s, q))(which))
+        yield ('remove_diag_' + which, (lambda q: lambda s: remove_diag(s, q))(which))
+
+
 def _period_of(seq):
     n = len(seq)
     for p in range(1, n + 1):
@@ -1190,6 +1316,69 @@ def extract_panels(g, color):
     return out
 
 
+def _panel_slots(g, color):
+    """Separator-delimited panel rectangles of `g`, in row-major order, together
+    with their contents.  Unlike `extract_panels` this also returns *where* each
+    panel sits, which is what lets a caller write a reordered panel back into the
+    slot it came from and keep the grid size (and the separators) intact."""
+    if not g or not g[0]:
+        return [], []
+    h, w = len(g), len(g[0])
+    rows, cols = _uniform_lines(g, color)
+    rs = [-1] + rows + [h]
+    cs = [-1] + cols + [w]
+    slots, panels = [], []
+    for i in range(len(rs) - 1):
+        for j in range(len(cs) - 1):
+            r0, r1 = rs[i] + 1, rs[i + 1]
+            c0, c1 = cs[j] + 1, cs[j + 1]
+            if r0 < r1 and c0 < c1:
+                slots.append((r0, r1, c0, c1))
+                panels.append([[g[r][c] for c in range(c0, c1)] for r in range(r0, r1)])
+    return slots, panels
+
+
+def reorder_panels(g, color, key='count', desc=True):
+    """Sort the separator-delimited panels of `g` by `key` and write them back
+    into the same slots in sorted order.
+
+    This is the "reorder the panels by their content" rule: the layout carries no
+    information and only the *order* of the panels is the answer (42a15761, where
+    each horizontal band sorts its four strips by cell count; 85b81ff1 likewise).
+    Only the panel interiors move, so the separators and the grid size are
+    untouched.  Panels of differing shape cannot be swapped, so they leave the
+    grid unchanged and simply fail verification rather than crashing."""
+    if not g or not g[0]:
+        return [list(row) for row in g]
+    slots, panels = _panel_slots(g, color)
+    if len(panels) < 2:
+        return [list(row) for row in g]
+    if len({(len(p), len(p[0])) for p in panels}) != 1:
+        return [list(row) for row in g]
+    bg = _bg(g)
+
+    def rank(p):
+        if key == 'count':
+            return sum(1 for row in p for v in row if v != bg)
+        if key == 'sum':
+            return sum(v for row in p for v in row)
+        if key == 'lex':
+            return tuple(tuple(row) for row in p)
+        return len(set(v for row in p for v in row))
+
+    order = sorted(range(len(panels)), key=lambda i: rank(panels[i]), reverse=desc)
+    out = [list(row) for row in g]
+    for pos, idx in enumerate(order):
+        r0, r1, c0, c1 = slots[pos]
+        panel = panels[idx]
+        for rr in range(r1 - r0):
+            row = out[r0 + rr]
+            prow = panel[rr]
+            for cc in range(c1 - c0):
+                row[c0 + cc] = prow[cc]
+    return out
+
+
 def _same_shape(grids):
     if len(grids) < 2:
         return False
@@ -1724,6 +1913,21 @@ def _enumerate_depth1(in0, out0, fast=False, allow_learned=True):
                     yield ('panels_%s(%d)' % (op, sep),
                            (lambda o, s: lambda g: panel_combine(g, o, s))(op, sep))
 
+    # reorder the panels by their content, keeping the layout.  Size-preserving
+    # and separator-preserving, so it is exact in both directions; only the panel
+    # interiors are permuted.  `cdiff == 0` because a permutation moves cells but
+    # never introduces or removes a colour.
+    if (h, w) == (H, W) and cdiff == 0:
+        for sep in _colors(in0):
+            slots, panels = _panel_slots(in0, sep)
+            if len(panels) < 2 or len({(len(p), len(p[0])) for p in panels}) != 1:
+                continue
+            for key in ('count', 'sum', 'lex', 'distinct'):
+                for desc in (True, False):
+                    if _eq(reorder_panels(in0, sep, key, desc), target):
+                        yield ('reorder_panels(%d,%s,%s)' % (sep, key, 'desc' if desc else 'asc'),
+                               (lambda s, k, d: lambda g: reorder_panels(g, s, k, d))(sep, key, desc))
+
     # strip the uniform separator rows/columns (shrinks)
     for sep in _colors(in0):
         rs = remove_separator(in0, sep)
@@ -1782,6 +1986,19 @@ def _enumerate_depth1(in0, out0, fast=False, allow_learned=True):
             yield ('count_diag(%d)' % color, (lambda cc: lambda g: count_diag(g, cc))(color))
 
     # (single-cell numerosity is tried earlier, before the degenerate crop rules)
+
+    # generic per-object operator (v9): apply a size-preserving primitive to each
+    # object's own bounding-box subgrid.  This is the generic form of the
+    # map_flip / map_rotate family that `_map_object_inners` enumerates, so the
+    # whole block is deliberately placed *after* every hand-written primitive: a
+    # task that already had a depth-1 solution keeps the identical program, and the
+    # operator can only add solves.  The dimension guard is exact — `map_objects`
+    # is size-preserving on the whole grid — and is a pure speed filter.
+    if (h, w) == (H, W):
+        for iname, fin, cand in _map_objects_batch(in0, list(_map_object_inners())):
+            if _eq(cand, target):
+                yield ('map_objects:' + iname,
+                       (lambda ff: lambda g: map_objects(g, ff))(fin))
 
     if allow_learned:
         for name, prog in _enumerate_learned_maps(in0, out0):
@@ -1860,6 +2077,18 @@ def _unconditional_transitions(g):
     for order in ((3, 2, 1), (1, 2, 3), (2, 3, 1)):
         yield ('quad_overlay_%d%d%d' % order,
                (lambda o: lambda x: quad_overlay(x, o))(order))
+    # reorder the separator-delimited panels by content (size-preserving).  Only
+    # separator colours that actually split the grid into equal-shaped panels are
+    # offered, which keeps the branch factor at ~4 per real separator rather than
+    # 80.
+    for sep in cols:
+        slots, panels = _panel_slots(g, sep)
+        if len(panels) < 2 or len({(len(p), len(p[0])) for p in panels}) != 1:
+            continue
+        for key in ('count', 'lex'):
+            for desc in (True, False):
+                yield ('reorder_panels(%d,%s,%s)' % (sep, key, 'desc' if desc else 'asc'),
+                       (lambda s, k, d: lambda x: reorder_panels(x, s, k, d))(sep, key, desc))
     yield ('remove_separator(0)', lambda x: remove_separator(x, 0))
     for c in range(10):
         yield ('fill_uniform_rows(%d)' % c, (lambda cc: lambda x: fill_uniform_rows(x, cc))(c))
@@ -1869,6 +2098,16 @@ def _unconditional_transitions(g):
     # operation, it belongs as the final, target-matched step rather than a
     # size-preserving intermediate.  Keeping it out of the intermediate set is what
     # keeps depth-3 search feasible.
+
+    # v9: the generic per-object operator.  Every inner is size-preserving, so the
+    # operator is a legal intermediate step.  Appended last so the intermediate
+    # grids it introduces never displace an existing f1 in enumeration order — an
+    # already-solved task still finds the same program first, which is what keeps
+    # this addition regression-free.  Redundant grids (the flip/rotate inners
+    # reproduce map_flip/map_rotate) are removed by the caller's dedup.
+    for iname, fin in _map_object_inners():
+        yield ('map_objects:' + iname,
+               (lambda ff: lambda x: map_objects(x, ff))(fin))
 
 
 def _compose(outer, inner):

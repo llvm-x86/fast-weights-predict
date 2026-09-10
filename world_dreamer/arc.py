@@ -29,6 +29,14 @@
 from collections import Counter, defaultdict, deque
 from functools import lru_cache
 
+# ---- W5_objectmap2 experiment toggles -------------------------------------
+# Three independent widenings of the generic per-object operator, each measured
+# on its own before being combined.  All three default to off, i.e. the shipped
+# baseline behaviour.
+_OMAP_CONN8 = True     # also sweep 8-connected objectness (corner-touching objects)
+_OMAP_BUILD = True     # add construction inners: paint inside the object's own box
+_OMAP_COMPOSE = False  # add length-2 inner compositions from a small pool
+
 # ---------------------------------------------------------------- grid helpers
 
 def _eq(g, target):
@@ -661,7 +669,7 @@ def map_objects(g, f, conn=4):
         sub = [[bg] * bw for _ in range(bh)]
         for r, c in cells:
             sub[r - r0][c - c0] = color
-        t = f(sub)
+        t = f(sub, color, bg)
         if not t or not t[0] or len(t) != bh or len(t[0]) != bw:
             return [list(row) for row in g]
         for r in range(bh):
@@ -672,23 +680,24 @@ def map_objects(g, f, conn=4):
     return out
 
 
-def _map_objects_batch(g, inners, conn=4):
-    """Batched form of `map_objects`: run every inner in `inners` over ONE shared
-    extraction (one background scan, one component decomposition, one subgrid per
-    object) and return [(name, f, transformed_grid), ...].
+def _object_boxes(g, conn):
+    """One shared extraction: background scan, component decomposition and one
+    tight subgrid per object — the part every inner of one `map_objects` sweep
+    reuses.  Returns `(bg, boxes)` with boxes a list of
+    `(r0, c0, bh, bw, sub, color)`, or None when there is nothing to transform
+    (an empty grid, a 1x1 grid, or no components at all).
 
-    `_enumerate_depth1` is called once per intermediate grid of the composed
-    search, so it is on the hot path; sharing the extraction there is what keeps
-    the generic operator affordable.  The result is exactly what calling
-    `map_objects(g, f)` per inner would give, including the 'a subgrid whose size
-    changed leaves the whole grid unchanged' rule."""
-    base = [list(row) for row in g]
+    `sub` is the object's bounding box, filled with the grid background and only
+    this object's cells, exactly as `map_flip` builds it; `color` is the
+    component's colour (a component is monochromatic, so it is exact) and `bg` the
+    grid background, both of which the construction inners need in order to paint
+    inside the box without having to re-derive them from `sub`."""
     if not g or not g[0] or (len(g) == 1 and len(g[0]) == 1):
-        return [(n, f, [list(r) for r in base]) for n, f in inners]
+        return None
     bg = _bg(g)
     comps = _components(g, bg) if conn == 4 else _components8(g, bg)
     if not comps:
-        return [(n, f, [list(r) for r in base]) for n, f in inners]
+        return None
     boxes = []
     for color, cells in comps:
         rs = [r for r, _ in cells]
@@ -698,12 +707,32 @@ def _map_objects_batch(g, inners, conn=4):
         sub = [[bg] * bw for _ in range(bh)]
         for r, c in cells:
             sub[r - r0][c - c0] = color
-        boxes.append((r0, c0, bh, bw, sub))
+        boxes.append((r0, c0, bh, bw, sub, color))
+    return bg, boxes
+
+
+def _map_objects_batch(g, inners, conn=4, boxes=None):
+    """Batched form of `map_objects`: run every inner in `inners` over ONE shared
+    extraction (one background scan, one component decomposition, one subgrid per
+    object) and return [(name, f, transformed_grid), ...].
+
+    `_enumerate_depth1` is called once per intermediate grid of the composed
+    search, so it is on the hot path; sharing the extraction there is what keeps
+    the generic operator affordable.  The result is exactly what calling
+    `map_objects(g, f)` per inner would give, including the 'a subgrid whose size
+    changed leaves the whole grid unchanged' rule.  `boxes` may be a precomputed
+    `_object_boxes` result for this grid and `conn`, which the caller has usually
+    already computed to decide whether the sweep is worth running at all."""
+    base = [list(row) for row in g]
+    ext = _object_boxes(g, conn) if boxes is None else boxes
+    if ext is None:
+        return [(n, f, [list(r) for r in base]) for n, f in inners]
+    bg, boxes = ext
     results = []
     for name, f in inners:
         out = None
-        for r0, c0, bh, bw, sub in boxes:
-            t = f(sub)
+        for r0, c0, bh, bw, sub, color in boxes:
+            t = f(sub, color, bg)
             if not t or not t[0] or len(t) != bh or len(t[0]) != bw:
                 out = None  # a box changed size: the whole grid is unchanged
                 break
@@ -720,12 +749,38 @@ def _map_objects_batch(g, inners, conn=4):
     return results
 
 
-def _map_object_inners():
+def _omap_conventions(g):
+    """The objectness conventions `map_objects` should be swept under for `g`.
+
+    Yields `(boxes, conn)` starting with the 4-connected extraction.  The
+    8-connected extraction is added only when it actually partitions the grid
+    differently from the 4-connected one — i.e. when some object touches another
+    only at a corner.  When the two agree, every conn=8 sweep would reproduce the
+    conn=4 results exactly, so running it would double the operator's cost for
+    nothing; the comparison is one extra BFS, far cheaper than the per-inner
+    work it saves."""
+    ext4 = _object_boxes(g, 4)
+    yield ext4, 4
+    if not _OMAP_CONN8:
+        return
+    ext8 = _object_boxes(g, 8)
+    if ext8 is not None and ext8 != ext4:
+        yield ext8, 8
+
+
+def _map_object_inners(with_build=True):
     """The bounded, deliberate set of inner primitives fed to `map_objects`.
 
     Every one is size-preserving on a subgrid, which is the precondition for the
-    in-place write-back.  The set is grouped by the ARC family it expresses *per
-    object*:
+    in-place write-back, and every one takes `(sub, color, bg)`: the object's own
+    tight bounding box filled with the grid background, the colour of the
+    component the box came from (components are monochromatic, so it is exact),
+    and the grid background.  The colour and the background are passed in rather
+    than re-derived from `sub` because a tight box can hold no background cell at
+    all (a solid rectangle) and because a box that happens to be mostly object
+    would otherwise fool any 'most common colour' guess.
+
+    The set is grouped by the ARC family it expresses *per object*:
       * the cell permutations the DSL already hand-writes as `map_flip` /
         `map_rotate` — kept for completeness (they reproduce those grids exactly,
         so they dedup against them in the composed search); `main`/`anti` are new,
@@ -734,27 +789,149 @@ def _map_object_inners():
       * mirror / point-symmetry completion of each object inside its box;
       * carving the cross / diagonals, or keeping the centre row/column, through
         each object's box centre;
-      * dilation of each object.
+      * dilation of each object;
+      * (optional) *construction* inners that paint inside the box, and
+        (optional) length-2 compositions of a small pool.
     Primitives that are identity on a tight bounding box (crop_to_bbox,
     remove_isolated, connect_points, ...) are deliberately excluded: they cannot
     change any object, so they would only cost search time."""
     for ax in ('h', 'v', 'main', 'anti'):
-        yield ('flip_' + ax, (lambda a: lambda s: flip(s, a))(ax))
+        yield ('flip_' + ax, (lambda a: lambda s, c, bg: flip(s, a))(ax))
     for k in (1, 2, 3):
-        yield ('rotate%d' % (90 * k), (lambda kk: lambda s: rotate(s, kk))(k))
+        yield ('rotate%d' % (90 * k), (lambda kk: lambda s, c, bg: rotate(s, kk))(k))
     for d in ('down', 'up', 'left', 'right'):
-        yield ('gravity_' + d, (lambda dd: lambda s: gravity(s, dd))(d))
+        yield ('gravity_' + d, (lambda dd: lambda s, c, bg: gravity(s, dd))(d))
     for ax in ('h', 'v'):
-        yield ('mirror_' + ax, (lambda a: lambda s: mirror_union(s, a))(ax))
-    yield ('mirror_hv', lambda s: mirror_point(s))
-    yield ('dilate', lambda s: dilate(s))
-    yield ('keep_cross', lambda s: keep_cross(s))
-    yield ('remove_cross', lambda s: remove_cross(s))
-    yield ('keep_mid_row', lambda s: keep_mid_row(s))
-    yield ('keep_mid_col', lambda s: keep_mid_col(s))
+        yield ('mirror_' + ax, (lambda a: lambda s, c, bg: mirror_union(s, a))(ax))
+    yield ('mirror_hv', lambda s, c, bg: mirror_point(s))
+    yield ('dilate', lambda s, c, bg: dilate(s))
+    yield ('keep_cross', lambda s, c, bg: keep_cross(s))
+    yield ('remove_cross', lambda s, c, bg: remove_cross(s))
+    yield ('keep_mid_row', lambda s, c, bg: keep_mid_row(s))
+    yield ('keep_mid_col', lambda s, c, bg: keep_mid_col(s))
     for which in ('main', 'anti', 'both'):
-        yield ('keep_diag_' + which, (lambda q: lambda s: keep_diag(s, q))(which))
-        yield ('remove_diag_' + which, (lambda q: lambda s: remove_diag(s, q))(which))
+        yield ('keep_diag_' + which, (lambda q: lambda s, c, bg: keep_diag(s, q))(which))
+        yield ('remove_diag_' + which, (lambda q: lambda s, c, bg: remove_diag(s, q))(which))
+    if _OMAP_BUILD and with_build:
+        for name, fn in _omap_build_inners():
+            yield (name, fn)
+    if _OMAP_COMPOSE:
+        for name, fn in _omap_compositions():
+            yield (name, fn)
+
+
+def _omap_build_inners():
+    """The construction inners: primitives that *build* inside the object's own
+    box instead of erasing or permuting.  All four whole-grid forms
+    (`fill_bbox_region`, `draw_bbox_outline`, `draw_object_cross`, `draw_border`)
+    are size-preserving on the box they are handed, and on a tight bbox subgrid
+    the box *is* the subgrid, so they act exactly 'inside the object's own box'.
+
+    They are taken directly from the existing primitive set rather than rewritten
+    per object because that set has already been exercised by the whole-grid
+    search; the only difference is the background the object's colour is derived
+    from, which here is the grid background passed in by the caller rather than
+    `_bg(sub)` (for a box that is mostly ink the latter can be the ink colour)."""
+    yield ('fill_box', lambda s, c, bg: s if c is None else _fill_box(s, c, bg))
+    yield ('outline_box', lambda s, c, bg: s if c is None else _outline_box(s, c, bg))
+    yield ('cross_box', lambda s, c, bg: s if c is None else _cross_box(s, c, bg))
+    for which in ('main', 'anti', 'both'):
+        yield ('draw_diag_' + which,
+               (lambda q: lambda s, c, bg: s if c is None else _draw_box_diag(s, c, bg, q))(which))
+
+
+def _fill_box(s, c, bg):
+    """Flood the box's background cells with the object's colour — solidifies a
+    sparse shape into its own bounding rectangle."""
+    r0, c0, r1, c1 = _bbox_of_nonzero(s, bg)
+    out = [list(row) for row in s]
+    for r in range(r0, r1 + 1):
+        row = out[r]
+        for cc in range(c0, c1 + 1):
+            if row[cc] == bg:
+                row[cc] = c
+    return out
+
+
+def _outline_box(s, c, bg):
+    """Draw the box outline in the object's colour (background cells only)."""
+    h, w = len(s), len(s[0])
+    out = [list(row) for row in s]
+    for cc in range(w):
+        if out[0][cc] == bg:
+            out[0][cc] = c
+        if out[h - 1][cc] == bg:
+            out[h - 1][cc] = c
+    for r in range(h):
+        if out[r][0] == bg:
+            out[r][0] = c
+        if out[r][w - 1] == bg:
+            out[r][w - 1] = c
+    return out
+
+
+def _cross_box(s, c, bg):
+    """Draw the full row and column through the box centre in the object's colour
+    (background cells only), i.e. complete each object into a cross."""
+    h, w = len(s), len(s[0])
+    cr, cc = h // 2, w // 2
+    out = [list(row) for row in s]
+    for j in range(w):
+        if out[cr][j] == bg:
+            out[cr][j] = c
+    for i in range(h):
+        if out[i][cc] == bg:
+            out[i][cc] = c
+    return out
+
+
+def _draw_box_diag(s, c, bg, which):
+    """Paint the box's own diagonal(s) in the object's colour (background only)."""
+    h, w = len(s), len(s[0])
+    out = [list(row) for row in s]
+    for r in range(h):
+        for cc in range(w):
+            if out[r][cc] != bg:
+                continue
+            on_main = (r == cc)
+            on_anti = (r + cc == h - 1) or (r + cc == w - 1)
+            if (which == 'main' and on_main) or (which == 'anti' and on_anti) \
+                    or (which == 'both' and (on_main or on_anti)):
+                out[r][cc] = c
+    return out
+
+
+def _omap_compose_pool():
+    """The small, deliberate pool from which the length-2 inner compositions are
+    drawn (size 6, reported explicitly because it squares into the branch factor).
+    It holds one of each *kind* the winning single inners came from — a mirror
+    completion, a rotation, gravity, dilation, the cross keeper and the diagonal
+    keeper — so a composition can express the families that need two steps inside
+    the box (settle-then-complete, thicken-then-carve, complete-then-rotate)."""
+    yield ('mirror_h', lambda s, c, bg: mirror_union(s, 'h'))
+    yield ('rotate90', lambda s, c, bg: rotate(s, 1))
+    yield ('gravity_down', lambda s, c, bg: gravity(s, 'down'))
+    yield ('dilate', lambda s, c, bg: dilate(s))
+    yield ('keep_cross', lambda s, c, bg: keep_cross(s))
+    yield ('keep_diag_both', lambda s, c, bg: keep_diag(s, 'both'))
+
+
+def _omap_compositions():
+    """Length-2 inner compositions `f2 ∘ f1`, both drawn from
+    `_omap_compose_pool` and applied inside the object's own box.  Only ordered
+    pairs of *distinct* pool members are emitted: `f ∘ f` for these six is either
+    identity or a single inner already in the set (a rotation, or an idempotent
+    completion), so those 6 would be pure cost.  A composition that changes the
+    box size on the way (a rotation of a non-square box) is caught by the
+    size-preservation check in `_map_objects_batch` and leaves the grid
+    unchanged; it is never allowed to write a wrongly-shaped subgrid back."""
+    pool = list(_omap_compose_pool())
+    for n2, f2 in pool:
+        for n1, f1 in pool:
+            if n1 == n2:
+                continue
+            yield ('%s_after_%s' % (n2, n1),
+                   (lambda a, b: lambda s, c, bg: a(b(s, c, bg), c, bg))(f2, f1))
 
 
 def _period_of(seq):
@@ -1995,10 +2172,13 @@ def _enumerate_depth1(in0, out0, fast=False, allow_learned=True):
     # operator can only add solves.  The dimension guard is exact — `map_objects`
     # is size-preserving on the whole grid — and is a pure speed filter.
     if (h, w) == (H, W):
-        for iname, fin, cand in _map_objects_batch(in0, list(_map_object_inners())):
-            if _eq(cand, target):
-                yield ('map_objects:' + iname,
-                       (lambda ff: lambda g: map_objects(g, ff))(fin))
+        inners = list(_map_object_inners())
+        for boxes, conn in _omap_conventions(in0):
+            suffix = '' if conn == 4 else ':c8'
+            for iname, fin, cand in _map_objects_batch(in0, inners, conn, boxes):
+                if _eq(cand, target):
+                    yield ('map_objects:' + iname + suffix,
+                           (lambda ff, cc: lambda g: map_objects(g, ff, cc))(fin, conn))
 
     if allow_learned:
         for name, prog in _enumerate_learned_maps(in0, out0):
@@ -2105,9 +2285,17 @@ def _unconditional_transitions(g):
     # already-solved task still finds the same program first, which is what keeps
     # this addition regression-free.  Redundant grids (the flip/rotate inners
     # reproduce map_flip/map_rotate) are removed by the caller's dedup.
-    for iname, fin in _map_object_inners():
-        yield ('map_objects:' + iname,
-               (lambda ff: lambda x: map_objects(x, ff))(fin))
+    # v_cb2: the widened inners and conn=8 are kept out of the *intermediate*
+    # step set.  Every extra f1 candidate that reaches a new grid costs a whole
+    # target-matched depth-1 sweep, so widening there is what makes the operator
+    # expensive; the measured gain comes from the widened inners as the final,
+    # target-matched step, so that is where they are wired.
+    inners = list(_map_object_inners(with_build=False))
+    for _boxes, conn in ((_object_boxes(g, 4), 4),):
+        suffix = ''
+        for iname, fin in inners:
+            yield ('map_objects:' + iname + suffix,
+                   (lambda ff, cc: lambda x: map_objects(x, ff, cc))(fin, conn))
 
 
 def _compose(outer, inner):

@@ -160,14 +160,14 @@ datasets, and only the variants that survive are re-measured on the full sets.
 | search depth | ARC-AGI-1 | ARC-AGI-2 |
 |---|---|---|
 | depth-1 | 56 / 400 (14.0%) | 63 / 1,000 (6.3%) |
-| depth-2 (default) | **83 / 400 (20.8%)** | **106 / 1,000 (10.6%)** |
+| depth-2 (default) | **84 / 400 (21.0%)** | **107 / 1,000 (10.7%)** |
 
 <p></p>
 
 | dataset | solved | fits every training example but misses the test |
 |---|---|---|
-| ARC-AGI-1 training | 83 / 400 | 2 |
-| ARC-AGI-2 training | 106 / 1,000 | 4 |
+| ARC-AGI-1 training | 84 / 400 | 2 |
+| ARC-AGI-2 training | 107 / 1,000 | 4 |
 | ARC-AGI-1 evaluation | 24 / 400 | 0 |
 | ARC-AGI-2 evaluation | 0 / 120 | 0 |
 
@@ -194,7 +194,7 @@ construction (`draw_bbox_outline`/`map_bbox_outline`/`fill_bbox_region`/
 `map_bbox_fill`/`draw_object_cross`), and the v8 layout rules (mirror tiling,
 quadrant logic, separator panels, point-symmetry completion, per-object outlines,
 rank recolouring), and the v9 operators below — plus two-step combinations of
-them). The other ~317 tasks are compositional, relational, numerosity, and
+them). The other ~316 tasks are compositional, relational, numerosity, and
 sequence-extrapolation tasks that a hand-written primitive DSL with shallow
 search does not reach —
 which is precisely where ARC's difficulty lies, and where the ARC-AGI-3 frontier
@@ -336,8 +336,8 @@ verifies. Measured as a union on the held-out test:
 
 | benchmark | DSL alone | learned alone | **combined** |
 |---|---|---|---|
-| ARC-AGI-1 | 83 / 400 (20.8%) | 15 / 400 (3.8%) | **93 / 400 (23.2%)** |
-| ARC-AGI-2 | 106 / 1,000 (10.6%) | 17 / 1,000 (1.7%) | **117 / 1,000 (11.7%)** |
+| ARC-AGI-1 | 84 / 400 (21.0%) | 15 / 400 (3.8%) | **94 / 400 (23.5%)** |
+| ARC-AGI-2 | 107 / 1,000 (10.7%) | 17 / 1,000 (1.7%) | **118 / 1,000 (11.8%)** |
 
 The same point holds when the dreamer is *automated*: `verify_solution.py` runs a
 language-model proposer (a solver agent per task) against the verifier. On an

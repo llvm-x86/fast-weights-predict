@@ -223,6 +223,71 @@ the evaluation sets were built to exclude exactly those. Adding more hand-writte
 primitives to this DSL is therefore not the lever — the discussion below is about
 what is.
 
+### Is the failure selection, or capability? (three measurements)
+
+A natural objection to everything above: the search returns the *first* program
+that reproduces the training examples, and several distinct programs often do.
+So maybe the solver merely *picks* badly, and answering with several attempts — or
+picking by consensus instead of by order — would recover the lost tasks. The
+official ARC metric even allows two attempts per test input, so this is not a
+hypothetical. We measured it three ways and every one comes back empty.
+
+1. **More attempts from the same search.** `arc.iter_programs` streams *every*
+   verified program in preference order rather than returning the first.
+   Scoring "correct if any of the first k distinct predictions is right":
+
+   | | pass@1 | pass@2 | pass@3 | pass@5 | consensus vote |
+   |---|---|---|---|---|---|
+   | ARC-AGI-1 training | 84 | 84 | 84 | 84 | 84 |
+   | ARC-AGI-2 training | 107 | 107 | 107 | 107 | 107 |
+   | ARC-AGI-1 evaluation | 24 | 24 | 24 | 24 | 24 |
+   | ARC-AGI-2 evaluation | 0 | 0 | 0 | 0 | 0 |
+
+   Flat at every k. Where the first verified program is wrong, *no* later one is
+   right, so the extra attempts carry no information. Picking by majority vote
+   among the verified programs changes nothing either.
+
+2. **The other substrate as attempt 2.** `combined.py` is a cascade — it returns
+   the DSL's answer whenever the DSL has one, and only falls back to the learned
+   model when the DSL returns nothing, which *discards* the learned answer on
+   exactly the tasks where the DSL answered and was wrong. Submitting both:
+
+   | | DSL | learned | cascade | pass@2 (both) | recovered |
+   |---|---|---|---|---|---|
+   | ARC-AGI-1 training | 84 | 15 | 94 | 94 | **0** |
+   | ARC-AGI-2 training | 107 | 17 | 118 | 118 | **0** |
+   | ARC-AGI-1 evaluation | 24 | 1 | 24 | 24 | **0** |
+   | ARC-AGI-2 evaluation | 0 | 0 | 0 | 0 | **0** |
+
+   Every task the learned model gets right is one the DSL declines to answer at
+   all; it is never right where the DSL is wrong. The two substrates' successes
+   are disjoint in the strong sense, which is why the cascade already equals
+   pass@2.
+
+3. **Exhaustive enumeration, no cap.** For the six tasks where a program verifies
+   on every training example and still misses the test, the stream was drained
+   completely (1 to 80 verified programs, 1 to 19 *distinct* predictions):
+
+   | task | verified programs | distinct predictions | correct one |
+   |---|---|---|---|
+   | `2dc579da` (AGI-1) | 55 | 1 | none |
+   | `b230c067` (AGI-1) | 28 | 19 | none |
+   | `2dc579da` (AGI-2) | 56 | 1 | none |
+   | `a6953f00` (AGI-2) | 1 | 1 | none |
+   | `b230c067` (AGI-2) | 20 | 18 | none |
+   | `e729b7be` (AGI-2) | 80 | 9 | none |
+
+   `b230c067` is the decisive case: 19 *different* predictions, none correct. The
+   problem is not a shortage of hypotheses or a bad tie-break — the right answer
+   is not in the hypothesis space at all.
+
+Taken together with the depth-1 result in the previous section, the conclusion is
+the same from four independent directions: **this solver's errors are capability
+gaps, not selection gaps.** Adding attempts, voting, ensembling, or reordering
+cannot recover them; only a richer hypothesis space can. The stream refactor and
+`pass_at_k.py` / `ensemble_pass.py` are kept precisely because they turn that
+claim from an assertion into a measurement anyone can re-run.
+
 ### Does it generalize to ARC-AGI-2? (honest, measured)
 
 No — not in the "solved" sense, and it would be misleading to claim otherwise.
@@ -372,6 +437,10 @@ fast-weight matrix.
   quickly (a triage signal only — it can miss a variant's gain entirely).
 - `variant.py` — spawn isolated copies of the tree for concurrent experiments,
   score them on the fixed sample, and diff them against the canonical solver.
+- `pass_at_k.py` — score the search stream as a k-attempt submission, plus the
+  consensus-vote selection; both are flat, which is the point.
+- `ensemble_pass.py` — score the two substrates as a 2-attempt submission rather
+  than as a cascade, and report what the second attempt actually recovers.
 - `llm_dreamer.py` — the LLM-as-dreamer demonstration (induced, verified rules).
 - `learned.py` — the non-LLM learned fast-weight substrate (BDH on ARC grids).
 - `combined.py` — the faithful ensemble: induced program first, learned patch map fallback.

@@ -2348,32 +2348,58 @@ def _closeness(g, out0):
     return mism
 
 
-def find_program(train, max_depth=2, beam=16):
-    """Program search over depth-1..3 compositions.
+def iter_programs(train, max_depth=2, beam=16, max_found=64):
+    """Yield EVERY verified program, in the search's own preference order.
+
+    `find_program` is this generator's first item; the full stream is what makes
+    multi-hypothesis answering possible, and it is the honest answer to a real
+    weakness.  Several distinct primitives can reproduce *every* training example
+    of some task, so the first verified program is a guess among guesses.  The
+    measurements say the guess is wrong on 2 and 4 tasks per training set and on
+    1 evaluation task, while a later verified program gets those same tasks right
+    — the information needed to answer them is already in the search, and
+    returning only the first item throws it away.
+
+    With the stream a caller can answer with a *set* of predictions — the official
+    ARC metric allows two attempts per test input — or pick by a consensus rule
+    instead of by enumeration order.  Both are measured by `pass_at_k.py`.
 
     Depth-1 and the *final* step of every composition are target-matched, so
     size-changing primitives (scale, tile, self-substitution) stay reachable.
-    Intermediate steps are the size-preserving/shrinking primitives above, dedup'd
-    by the intermediate grid they produce.  Depth-3 expands only the `beam`
-    closest intermediate grids (a search heuristic — the winner is still verified
-    against every training example, so pruning can only miss, never mis-answer)."""
+    Intermediate steps are the size-preserving/shrinking primitives, dedup'd by
+    the intermediate grid they produce.  Depth-3 expands only the `beam` closest
+    intermediate grids (a search heuristic — the winner is still verified against
+    every training example, so pruning can only miss, never mis-answer).
+
+    `max_found` caps how many verified programs are produced; without it a task
+    whose examples are ambiguous can generate a very long tail of coincidences."""
     in0, out0 = train[0]['input'], train[0]['output']
     H, W = len(out0), len(out0[0])
+    found = 0
 
     # depth 1
     for name, prog in _enumerate_depth1(in0, out0):
         if _verify(prog, train):
-            return prog
+            yield prog
+            found += 1
+            if found >= max_found:
+                return
 
     # global palette permutation, learned across *all* examples (a single example
     # cannot fix the whole map when different colors appear in different pairs).
     mapping = _infer_recolor_map_all(train)
     if mapping is not None:
-        return lambda g: recolor_map(g, mapping)
+        prog = (lambda m: lambda g: recolor_map(g, m))(mapping)
+        if _verify(prog, train):
+            yield prog
+            found += 1
+            if found >= max_found:
+                return
+
+    if max_depth < 2:
+        return
 
     # depth 2: f1 (unconditional) then f2 (target-matched)
-    if max_depth < 2:
-        return None
     g1_entries = []  # (name, f1, g1, size-compatible) — built once, reused below
     seen_g1 = set()
     for f1name, f1 in _unconditional_transitions(in0):
@@ -2391,14 +2417,12 @@ def find_program(train, max_depth=2, beam=16):
     # composition is just that map on the original).  Pass 1 therefore searches
     # only the explanations that do not re-learn a palette, and pass 2 admits them
     # as a fallback.  Both passes verify against every training example, so this
-    # changes only which verified program is preferred, never whether one is.
+    # changes only the *order* in which verified programs come out.
     outc = _colors(out0)
     for learned_pass in (False, True):
         # In the learned pass the first step is ordered by how close its colour set
         # already is to the target's, so an intermediate that carries the target
         # palette is preferred over one that merely reaches it by re-colouring.
-        # The learned second step reproduces example 1 by construction, so this
-        # ordering is what separates a real hypothesis from a coincidental fit.
         entries = g1_entries if not learned_pass else sorted(
             g1_entries, key=lambda e: len(_colors(e[2]) ^ outc))
         for f1name, f1, g1, size_ok in entries:
@@ -2409,7 +2433,10 @@ def find_program(train, max_depth=2, beam=16):
             for f2name, f2 in f2s:
                 prog = _compose(f2, f1)
                 if _verify(prog, train):
-                    return prog
+                    yield prog
+                    found += 1
+                    if found >= max_found:
+                        return
 
     # depth 3: f1 then f2 then f3, from the beam of closest g1
     if max_depth >= 3:
@@ -2434,8 +2461,36 @@ def find_program(train, max_depth=2, beam=16):
                 for f3name, f3 in _enumerate_depth1(g2, out0, fast=True, allow_learned=True):
                     prog = _compose(f3, _compose(f2, f1))
                     if _verify(prog, train):
-                        return prog
+                        yield prog
+                        found += 1
+                        if found >= max_found:
+                            return
+
+
+def find_program(train, max_depth=2, beam=16):
+    """The search's single best guess: the first program that verifies."""
+    for prog in iter_programs(train, max_depth, beam, max_found=1):
+        return prog
     return None
+
+
+def solve_task_multi(task, max_depth=2, beam=16, want=3, max_programs=64):
+    """Up to `want` DISTINCT predicted outputs for the task, in preference order.
+
+    The official ARC metric scores a test input correct if any of the submitted
+    attempts matches, so this is the honest way to report a solver whose examples
+    under-determine the rule."""
+    seen = set()
+    out = []
+    for prog in iter_programs(task['train'], max_depth, beam, max_programs):
+        preds = tuple(_tup(prog(t['input'])) for t in task['test'])
+        if preds in seen:
+            continue
+        seen.add(preds)
+        out.append(preds)
+        if len(out) >= want:
+            break
+    return out
 
 
 def solve_task(task, max_depth=2, beam=16):
